@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Reader-Leader Codespaces setup and frontend preview.
+# Reader-Leader Codespaces setup and full application preview.
 # Run from the repository root with:
 #   bash codespace-setup.sh
 
@@ -37,9 +37,21 @@ echo "Building the application..."
 pnpm build
 
 echo
-echo "Validation passed. Starting the frontend preview on port ${PORT}..."
+if [[ -z "${OAUTH_SERVER_URL:-}" ]]; then
+  echo
+  echo "Validation passed, but OAUTH_SERVER_URL is not configured."
+  echo "Add the project environment variables to Codespaces Secrets before starting the full app:"
+  echo "  OAUTH_SERVER_URL"
+  echo "  DATABASE_URL"
+  echo "  JWT_SECRET"
+  echo
+  echo "The frontend-only Vite server is not a valid application preview because it has no /api/trpc backend."
+  exit 2
+fi
+
+echo "Validation passed. Starting the full application server on port ${PORT}..."
 echo "In Codespaces, open the Ports tab and select port ${PORT}."
 echo "Press Ctrl+C to stop the preview."
 echo
 
-exec pnpm exec vite --host 0.0.0.0 --port "${PORT}"
+exec pnpm dev --host 0.0.0.0 --port "${PORT}"

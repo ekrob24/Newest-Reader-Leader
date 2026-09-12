@@ -37,13 +37,19 @@ echo "Building the application..."
 pnpm build
 
 echo
-if [[ -z "${OAUTH_SERVER_URL:-}" ]]; then
+missing_vars=()
+for variable in JWT_SECRET DATABASE_URL READER_LEADER_CHILD_DEMO_PASSWORD READER_LEADER_TEACHER_DEMO_PASSWORD READER_LEADER_PARENT_DEMO_PASSWORD; do
+  if [[ -z "${!variable:-}" ]]; then
+    missing_vars+=("${variable}")
+  fi
+done
+
+if (( ${#missing_vars[@]} > 0 )); then
   echo
-  echo "Validation passed, but OAUTH_SERVER_URL is not configured."
-  echo "Add the project environment variables to Codespaces Secrets before starting the full app:"
-  echo "  OAUTH_SERVER_URL"
-  echo "  DATABASE_URL"
-  echo "  JWT_SECRET"
+  echo "Validation passed, but local demo secrets are missing:"
+  printf '  %s\n' "${missing_vars[@]}"
+  echo "Add these values to Codespaces Secrets before starting the full app."
+  echo "OAUTH_SERVER_URL is only required for the optional hosted OAuth flow."
   echo
   echo "The frontend-only Vite server is not a valid application preview because it has no /api/trpc backend."
   exit 2

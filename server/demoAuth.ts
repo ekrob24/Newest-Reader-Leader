@@ -14,19 +14,17 @@ const accounts: DemoAccount[] = [
   { username: "parent3", openId: "reader-leader-local-parent3", name: "Amina’s Parent", role: "parent", passwordEnv: "READER_LEADER_PARENT_DEMO_PASSWORD" },
 ];
 
-export const PUBLIC_DEMO_PASSWORD = "readerleader";
-
 function secureMatch(value: string, expected: string) {
   const left = Buffer.from(value);
   const right = Buffer.from(expected);
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Demo-only verification. Deployments may override the documented public-demo fallback. */
+/** Demo-only verification. Values remain server-side environment variables. */
 export function verifyDemoCredentials(username: string, password: string): DemoAccount | null {
   const account = accounts.find(candidate => candidate.username === username.trim().toLowerCase());
   if (!account) return null;
-  const expectedPassword = process.env[account.passwordEnv] || PUBLIC_DEMO_PASSWORD;
-  if (!secureMatch(password, expectedPassword)) return null;
+  const expectedPassword = process.env[account.passwordEnv];
+  if (!expectedPassword || !secureMatch(password, expectedPassword)) return null;
   return account;
 }

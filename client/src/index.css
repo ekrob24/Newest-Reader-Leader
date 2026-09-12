@@ -1,28 +1,11 @@
-@import "tailwindcss";
+@import "./globals.css";
 
-:root {
-  --paper: #fbf8ed;
-  --ink: #11204c;
-  --blue: #2350c5;
-  --red: #e64b38;
-  --yellow: #f4c746;
-  --mint: #d9f0e5;
-  --line: #11204c;
-  --soft-line: rgba(17, 32, 76, 0.16);
-  --muted: #596382;
-  font-family: "Manrope", Arial, sans-serif;
-  color: var(--ink);
-  background: var(--paper);
-}
-
-* { box-sizing: border-box; }
-html { background: var(--paper); }
-body { margin: 0; min-width: 320px; background: var(--paper); }
+/* Existing Reader Leader feature styles retain their functional layout rules. */
 button, input { font: inherit; }
 button { cursor: pointer; }
-button:focus-visible, a:focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
+button:focus-visible, a:focus-visible { outline: 3px solid var(--reader-gold); outline-offset: 3px; }
 
-.rl-app { min-height: 100vh; overflow: hidden; background: var(--paper); }
+.rl-app { min-height: 100vh; overflow: hidden; background: var(--reader-cream); color: var(--reader-ink); font-family: var(--font-educator); }
 .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 19px clamp(20px, 5vw, 72px); border-bottom: 2px solid var(--ink); position: relative; z-index: 5; background: var(--paper); }
 .brand { display: flex; align-items: center; gap: 12px; color: var(--ink); border: 0; background: transparent; font-family: "Archivo Black", sans-serif; font-size: 23px; letter-spacing: -1.3px; padding: 0; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; background: var(--yellow); border: 2px solid var(--ink); border-radius: 50%; box-shadow: 4px 4px 0 var(--ink); }

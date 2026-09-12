@@ -1,0 +1,125 @@
+/* Reader-Leader design tokens and global foundations. */
+@import "tailwindcss" source(none);
+@source "./";
+@source "../../shared";
+
+:root {
+  --reader-cream: #fbf8ee;
+  --reader-paper: #fffefa;
+  --reader-teal: #278b8f;
+  --reader-teal-deep: #17676b;
+  --reader-teal-soft: #bfe7e4;
+  --reader-gold: #d9ab36;
+  --reader-gold-deep: #a97812;
+  --reader-navy: #071536;
+  --reader-ink: #101426;
+  --reader-muted: #727889;
+  --reader-mint: #dff3e5;
+  --reader-aqua: #dff4f4;
+  --reader-amber: #f4d39b;
+  --reader-red: #c63838;
+  --reader-pink: #ef5fa8;
+  --reader-green: #48ad68;
+  --reader-yellow: #ffd819;
+  --radius-student-card: 2.1rem;
+  --radius-educator-card: 1.4rem;
+  --shadow-student: 0 12px 24px rgba(43, 66, 58, 0.14), 0 2px 4px rgba(43, 66, 58, 0.08);
+  --shadow-educator: 0 12px 22px rgba(7, 21, 54, 0.12), 0 2px 5px rgba(7, 21, 54, 0.08);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --font-student: "Arial Rounded MT Bold", "Trebuchet MS", ui-rounded, system-ui, sans-serif;
+  --font-reading: "Trebuchet MS", "Avenir Next", system-ui, sans-serif;
+  --font-educator: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+
+  /* Compatibility aliases used by the existing feature styles. */
+  --paper: var(--reader-cream);
+  --ink: var(--reader-ink);
+  --blue: var(--reader-teal);
+  --red: var(--reader-red);
+  --yellow: var(--reader-gold);
+  --mint: var(--reader-mint);
+  --line: var(--reader-ink);
+  --soft-line: rgba(16, 20, 38, 0.16);
+  --muted: var(--reader-muted);
+  font-family: var(--font-educator);
+  color: var(--reader-ink);
+  background: var(--reader-cream);
+}
+
+* { box-sizing: border-box; }
+html {
+  min-height: 100%;
+  background: var(--reader-cream);
+  color: var(--reader-ink);
+  scroll-behavior: smooth;
+}
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--reader-cream);
+  color: var(--reader-ink);
+  font-family: var(--font-educator);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  min-height: 100vh;
+  background: var(--reader-cream);
+  font-family: var(--font-educator);
+}
+button, a { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled), a[href] { cursor: pointer; }
+:focus-visible { outline: 4px solid color-mix(in srgb, var(--reader-gold) 75%, white); outline-offset: 4px; }
+::selection { background: var(--reader-teal-soft); color: var(--reader-navy); }
+
+.student-canvas {
+  min-height: 100svh;
+  background: radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.92), transparent 34rem), var(--reader-cream);
+  color: var(--reader-teal-deep);
+  font-family: var(--font-student);
+}
+.educator-canvas {
+  min-height: 100svh;
+  background: radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.98), transparent 34rem), #f6f7fa;
+  color: var(--reader-navy);
+  font-family: var(--font-educator);
+}
+.student-card {
+  border: 1px solid rgba(38, 98, 94, 0.08);
+  border-radius: var(--radius-student-card);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--shadow-student);
+}
+.educator-card {
+  border: 1px solid rgba(7, 21, 54, 0.1);
+  border-radius: var(--radius-educator-card);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-educator);
+}
+.pressable { transition: transform 150ms var(--ease-out), box-shadow 180ms var(--ease-out), opacity 180ms var(--ease-out); }
+.pressable:active { transform: scale(0.97); }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.microphone-control { box-shadow: 0 0 30px 14px rgba(104, 208, 160, 0.24); }
+.microphone-wave { position: absolute; inset: -2rem; border: 4px solid rgba(101, 188, 177, 0.22); border-radius: 999px; pointer-events: none; }
+.microphone-wave.wave-two { inset: -3.5rem; opacity: 0.55; }
+@media (prefers-reduced-motion: no-preference) {
+  .microphone-control.is-listening .microphone-wave { animation: microphone-breathe 1.8s var(--ease-out) infinite alternate; }
+  .microphone-control.is-listening .wave-two { animation-delay: 180ms; }
+}
+@keyframes microphone-breathe {
+  from { opacity: 0.24; transform: scale(0.96); }
+  to { opacity: 0.72; transform: scale(1.04); }
+}
+@media print {
+  nav, button { display: none !important; }
+  .educator-canvas { background: white; padding: 0; }
+  .educator-card { box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

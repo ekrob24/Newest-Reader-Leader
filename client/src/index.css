@@ -518,3 +518,152 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--reader-gold); o
 .question-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }.question-editor-head h3 { margin: 0; }.question-editor-head p { margin: 5px 0 0; color: #65758e; font-size: 11px; }.question-editor-head > button,.question-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #bcd0ed; border-radius: 8px; padding: 7px 9px; background: #eff5ff; color: #315c9b; font-size: 10px; font-weight: 900; }.editable-question { padding: 15px; border: 1px solid #dae4f1; border-radius: 14px; background: #fff; }.question-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; color: #435a79; font-size: 11px; }.question-actions span { display: flex; gap: 5px; }.question-actions button { width: 29px; height: 29px; padding: 0; }.question-actions button:disabled,.question-editor-head > button:disabled { opacity: .45; }.question-prompt-input,.exercise-document .vocabulary-card input,.exercise-document .vocabulary-card textarea,.teacher-answer-field input,.teacher-answer-field textarea { width: 100%; border: 1px solid #c9d7ea; border-radius: 8px; padding: 9px; background: #fbfdff; color: var(--ink); font: inherit; font-size: 12px; line-height: 1.4; resize: vertical; }.exercise-document .vocabulary-card input { margin-bottom: 8px; color: #2b4777; font-family: "Archivo Black",sans-serif; font-size: 15px; }.teacher-answer-field { display: grid; gap: 5px; margin-top: 9px; color: #536987; font-family: "DM Mono",monospace; font-size: 9px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }.preview-options label input[type="text"],.preview-options label > input:not([type]) { min-width: 0; flex: 1; border: 0; border-bottom: 1px dashed #c7d3e2; padding: 4px; background: transparent; color: #334b6b; font-size: 12px; }.word-practice-message { margin: 11px 0 0; border-radius: 9px; padding: 9px 11px; background: #f0fbf5; color: #216549; font-size: 11px; font-weight: 800; }.recording-status { align-self: center; color: #6c7a90; font-size: 11px; font-weight: 700; }
 @media (max-width: 900px) { .teacher-quick-start ol,.quiz-studio-guide ol { grid-template-columns: 1fr 1fr; }.teacher-tabbar { top: 6px; }.studio-intro { flex-direction: column; }.studio-intro > span { align-self: flex-start; } }
 @media (max-width: 640px) { .teacher-quick-start > button { align-items: flex-start; flex-direction: column; }.teacher-quick-start ol,.quiz-studio-guide ol { grid-template-columns: 1fr; }.teacher-tabbar { margin-bottom: 13px; }.teacher-tabbar button { flex: 0 0 auto; }.teacher-quick-actions button { flex: 1 1 44%; justify-content: center; }.studio-intro { padding: 17px; }.question-editor-head { flex-direction: column; }.question-editor-head > button { width: 100%; justify-content: center; }.editable-question { padding: 11px; }.exercise-document .preview-options label { grid-template-columns: 17px 20px minmax(0,1fr); }.exercise-document .preview-options label input:not([type]) { width: 100%; } }
+
+
+/* Reader-Leader component layer: warm surfaces, soft educator depth, and tactile controls. */
+[data-sidebar="sidebar"] {
+  background: var(--reader-paper);
+  border-color: rgba(7, 21, 54, 0.1);
+  color: var(--reader-navy);
+}
+[data-sidebar="sidebar"] [data-sidebar="menu-button"] {
+  border-radius: 0.9rem;
+  color: var(--reader-navy);
+}
+[data-sidebar="sidebar"] [data-sidebar="menu-button"][data-active="true"] {
+  background: color-mix(in srgb, var(--reader-teal) 14%, var(--reader-paper));
+  color: var(--reader-teal-deep);
+  box-shadow: inset 4px 0 0 var(--reader-teal);
+}
+[data-sidebar="sidebar"] [data-sidebar="menu-button"]:hover {
+  background: var(--reader-aqua);
+}
+[data-sidebar="sidebar"] [data-sidebar="menu-button"] svg {
+  color: var(--reader-teal);
+}
+
+.dashboard-card,
+.session-review,
+.stat-card,
+.material-lab,
+.detail-card,
+.exercise-document,
+.report-card,
+.teacher-quick-start,
+.speech-review-panel,
+.class-manager,
+.analytics-card,
+.learner-plan-card {
+  border: 1px solid rgba(7, 21, 54, 0.1);
+  border-radius: var(--radius-educator-card);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-educator);
+}
+.dashboard-card,
+.session-review,
+.material-lab,
+.detail-card,
+.exercise-document,
+.report-card,
+.teacher-quick-start,
+.speech-review-panel,
+.class-manager,
+.analytics-card,
+.learner-plan-card {
+  padding: clamp(1.1rem, 2vw, 1.6rem);
+}
+.stat-card { padding: 1.25rem; }
+.student-card,
+.auth-card,
+.kids-reader-stage,
+.kids-move-on-card { border-radius: var(--radius-student-card); box-shadow: var(--shadow-student); }
+
+.primary-cta,
+.secondary-cta,
+.icon-cta,
+.compact-action,
+.teacher-quick-actions button,
+.form-actions button,
+.modal-actions button {
+  border-radius: 0.9rem;
+  border-color: transparent;
+}
+.primary-cta,
+.teacher-quick-actions button:first-child,
+.form-actions .primary-cta {
+  background: var(--reader-teal);
+  color: white;
+}
+.secondary-cta,
+.form-actions .secondary-cta {
+  background: var(--reader-gold);
+  color: var(--reader-navy);
+}
+.pressable,
+.primary-cta,
+.secondary-cta,
+.icon-cta,
+.compact-action,
+button,
+a[href],
+[data-sidebar="menu-button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+.pressable:active,
+.primary-cta:active,
+.secondary-cta:active,
+.icon-cta:active,
+.compact-action:active,
+button:active:not(:disabled),
+[data-sidebar="menu-button"]:active {
+  transform: scale(0.97);
+}
+
+input,
+textarea,
+select,
+.setup-card input,
+.material-form input,
+.material-form textarea,
+.material-form select,
+.question-prompt-input,
+.teacher-answer-field input,
+.teacher-answer-field textarea {
+  border: 1px solid rgba(7, 21, 54, 0.14);
+  border-radius: 0.75rem;
+  background: var(--reader-cream);
+  color: var(--reader-ink);
+}
+input:focus,
+textarea:focus,
+select:focus,
+.setup-card input:focus,
+.material-form input:focus,
+.material-form textarea:focus,
+.material-form select:focus {
+  border-color: var(--reader-gold);
+  outline: 3px solid color-mix(in srgb, var(--reader-gold) 28%, transparent);
+  box-shadow: 0 0 0 1px var(--reader-gold);
+}
+[role="dialog"],
+[data-radix-dialog-content],
+[data-radix-alert-dialog-content] {
+  border: 1px solid rgba(7, 21, 54, 0.1);
+  border-radius: var(--radius-educator-card);
+  background: var(--reader-paper);
+  box-shadow: var(--shadow-educator);
+}
+
+@media (max-width: 768px) {
+  .dashboard-card,
+  .session-review,
+  .material-lab,
+  .detail-card,
+  .exercise-document,
+  .report-card,
+  .teacher-quick-start,
+  .speech-review-panel,
+  .class-manager,
+  .analytics-card,
+  .learner-plan-card { padding: 1rem; }
+}

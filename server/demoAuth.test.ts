@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
+import { PUBLIC_DEMO_PASSWORD } from "./demoAuth";
 
 const context = { user: null, req: { headers: {} }, res: {} } as TrpcContext;
 
 describe("demoAccess.verify", () => {
   it("accepts the configured child demo password through the public tRPC endpoint", async () => {
     const caller = appRouter.createCaller(context);
-    const result = await caller.demoAccess.verify({ username: "child1", password: process.env.READER_LEADER_CHILD_DEMO_PASSWORD || "" });
+    const result = await caller.demoAccess.verify({ username: "child1", password: process.env.READER_LEADER_CHILD_DEMO_PASSWORD || PUBLIC_DEMO_PASSWORD });
     expect(result).toEqual({ username: "child1", role: "child", name: "Amina Roe" });
   });
 

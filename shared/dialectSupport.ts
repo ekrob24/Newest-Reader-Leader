@@ -6,49 +6,130 @@ export const readingLanguageSupportLabels: Record<ReadingLanguageSupport, string
   IRISH_ENGLISH_SUPPORT: "Irish English support · teacher review",
 };
 
-export const normaliseIrishReadingWord = (word: string) => word.toLocaleLowerCase("en-IE").replace(/[^a-z']/g, "");
-
 /**
- * A deliberately small, review-led Irish English tolerance list.
+ * IMPORTANT — scope of this layer.
  *
- * Whisper returns words rather than phonemes, so this does not attempt accent
- * classification. It only recognises selected transcript substitutions that can
- * reflect regional realisations and asks a teacher to confirm them from audio.
+ * Whisper returns *words*, not phonemes. This matcher only recognises Irish
+ * English features that actually change the spelling of a transcript. In
+ * practice that is the consonantal features:
+ *   - TH-stopping   (thin -> tin,  that -> dat)
+ *   - G-dropping    (running -> runnin)
+ *   - irregular TH-cluster reductions (through -> true)
+ *   - homophone pairs from a vowel merger where BOTH forms are real words
+ *     (caught -> cot) — the only way a vowel feature can surface in text.
+ *
+ * Vowel and rhotic features — TRAP-BATH broad-a, the cot/caught vowel itself,
+ * post-vocalic /r/ (the "horse" demo) — are real in speech but Whisper renders
+ * them with standard spelling, so they are invisible here and CANNOT be handled
+ * at the word level. Those belong to the phoneme-level scorer, not this file.
+ *
+ * Every accepted variant is a *provisional* match routed to teacher review,
+ * never a silent auto-accept.
+ *
+ * Two layers, checked in this order:
+ *   1. educator-approved variants — an explicit teacher decision for their class
+ *   2. rule-derived variants      — generated from the features above
+ *
+ * Note: post-vocalic /r/ is NOT treated as a variant. Irish English is rhotic,
+ * so park -> pork is a genuine misread, not a dialect feature.
+ *
+ * Rule-derived matches persist as source "built_in", so the stored review
+ * record and its enum are unchanged.
  */
-const irishEnglishReviewedVariants: Record<string, readonly string[]> = {
-  bath: ["bat"],
-  path: ["pat"],
-  grass: ["gras"],
-  class: ["clas"],
-  castle: ["cassel"],
-  caught: ["cot"],
-  court: ["cort"],
-  park: ["pork"],
-  hard: ["hod"],
-  card: ["cod"],
-  thin: ["tin"],
-  thing: ["ting"],
-  three: ["tree"],
-  through: ["true"],
-  this: ["dis"],
-  that: ["dat"],
-  them: ["dem"],
-  then: ["den"],
-  they: ["day"],
-  with: ["wit"],
+
+const normalise = (word: string) => word.toLocaleLowerCase("en-IE").replace(/[^a-z']/g, "");
+
+/** Retained under its original name: imported elsewhere in the codebase. */
+export const normaliseIrishReadingWord = normalise;
+
+export type DialectFeature =
+  | "th-stopping-voiceless"
+  | "th-stopping-voiced"
+  | "g-dropping"
+  | "th-cluster"
+  | "cot-caught-merger";
+
+export const dialectFeatureLabels: Record<DialectFeature, string> = {
+  "th-stopping-voiceless": "TH-stopping (theta->t, e.g. thin->tin)",
+  "th-stopping-voiced": "TH-stopping (edh->d, e.g. that->dat)",
+  "g-dropping": "G-dropping (-ing->-in, e.g. running->runnin)",
+  "th-cluster": "TH cluster reduction (e.g. through->true)",
+  "cot-caught-merger": "Cot-caught vowel merger (homophone pair)",
 };
 
-export type EducatorApprovedIrishVariant = { expectedWord: string; recognisedVariant: string };
-export type DialectMatch = { matches: boolean; provisionalIrishEnglish: boolean; source?: "built_in" | "educator_approved" };
+const voicedThInitial = new Set([
+  "the", "this", "that", "these", "those", "them", "then", "they", "there",
+  "their", "theirs", "themselves", "though", "than", "thus", "thee", "thy", "thine",
+]);
 
-export function matchExpectedReadingWord(expectedWord: string, recognisedWord: string, support: ReadingLanguageSupport = "STANDARD_ENGLISH", educatorApprovedVariants: EducatorApprovedIrishVariant[] = []): DialectMatch {
-  const expected = normaliseIrishReadingWord(expectedWord);
-  const recognised = normaliseIrishReadingWord(recognisedWord);
+const monosyllabicIng = new Set([
+  "thing", "king", "ring", "sing", "wing", "bring", "cling", "sting", "spring",
+  "string", "swing", "bling", "zing", "ding", "ping", "fling", "sling",
+]);
+
+const irregularVariants: Record<string, ReadonlyArray<{ variant: string; feature: DialectFeature }>> = {
+  through: [{ variant: "true", feature: "th-cluster" }, { variant: "tru", feature: "th-cluster" }],
+  they: [{ variant: "day", feature: "th-stopping-voiced" }],
+  caught: [{ variant: "cot", feature: "cot-caught-merger" }],
+};
+
+
+export function irishEnglishVariants(expected: string): Map<string, DialectFeature> {
+  const word = normalise(expected);
+  const variants = new Map<string, DialectFeature>();
+  if (!word) return variants;
+
+  const add = (candidate: string, feature: DialectFeature) => {
+    const clean = normalise(candidate);
+    if (clean && clean !== word && !variants.has(clean)) variants.set(clean, feature);
+  };
+
+  if (word.includes("th")) {
+    if (voicedThInitial.has(word)) {
+      add(word.replace(/th/g, "d"), "th-stopping-voiced");
+    } else {
+      add(word.replace(/th/g, "t"), "th-stopping-voiceless");
+      if (word === "with") add("wid", "th-stopping-voiced");
+    }
+  }
+
+  if (word.endsWith("ing") && !monosyllabicIng.has(word)) {
+    add(`${word.slice(0, -3)}in`, "g-dropping");
+    if (word.includes("th")) add(`${word.slice(0, -3).replace(/th/g, "t")}in`, "g-dropping");
+  }
+
+  for (const { variant, feature } of irregularVariants[word] ?? []) add(variant, feature);
+
+  return variants;
+}
+
+export type EducatorApprovedIrishVariant = { expectedWord: string; recognisedVariant: string };
+export type DialectMatch = {
+  matches: boolean;
+  provisionalIrishEnglish: boolean;
+  feature?: DialectFeature;
+  source?: "built_in" | "educator_approved";
+};
+
+export function matchExpectedReadingWord(
+  expectedWord: string,
+  recognisedWord: string,
+  support: ReadingLanguageSupport = "STANDARD_ENGLISH",
+  educatorApprovedVariants: EducatorApprovedIrishVariant[] = [],
+): DialectMatch {
+  const expected = normalise(expectedWord);
+  const recognised = normalise(recognisedWord);
   if (expected === recognised) return { matches: true, provisionalIrishEnglish: false };
   if (support !== "IRISH_ENGLISH_SUPPORT" || !expected) return { matches: false, provisionalIrishEnglish: false };
-  const educatorApproved = educatorApprovedVariants.some(variant => normaliseIrishReadingWord(variant.expectedWord) === expected && normaliseIrishReadingWord(variant.recognisedVariant) === recognised);
+
+  const educatorApproved = educatorApprovedVariants.some(
+    variant => normalise(variant.expectedWord) === expected && normalise(variant.recognisedVariant) === recognised,
+  );
   if (educatorApproved) return { matches: true, provisionalIrishEnglish: true, source: "educator_approved" };
-  return irishEnglishReviewedVariants[expected]?.includes(recognised) ? { matches: true, provisionalIrishEnglish: true, source: "built_in" } : { matches: false, provisionalIrishEnglish: false };
+
+  const feature = irishEnglishVariants(expected).get(recognised);
+  if (!feature) return { matches: false, provisionalIrishEnglish: false };
+  return { matches: true, provisionalIrishEnglish: true, feature, source: "built_in" };
 }
 
 export function isIrishEnglishSupportEnabled(support: ReadingLanguageSupport) {

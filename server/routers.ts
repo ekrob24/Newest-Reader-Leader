@@ -4,13 +4,13 @@ import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
 import { systemRouter } from "./_core/systemRouter";
-import { transcribeAudio } from "./_core/voiceTranscription";
+import { transcribeAudio } from "./whisperTranscription";
 import { publicProcedure, router } from "./_core/trpc";
 import { analyseReadingText } from "./reader";
 import { readerLeaderRouter } from "./routers/readerLeader";
 import { verifyDemoCredentials } from "./demoAuth";
 import { provisionLocalDemoCohort } from "./readerDb";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storagePut } from "./storage";
 
 const MAX_AUDIO_BYTES = 4_500_000;
 
@@ -58,7 +58,7 @@ export const appRouter = router({
       const mimeType = safeAudioMimeType(input.audioMime);
       const extension = mimeType.split("/")[1] ?? "webm";
       const { key } = await storagePut(`reader-leader/recordings/demo-${Date.now()}.${extension}`, bytes, mimeType);
-      const transcription = await transcribeAudio({ audioUrl: await storageGetSignedUrl(key), language: "en", prompt: "Transcribe an English-speaking child reading aloud. Preserve words as spoken. Do not correct mistakes." });
+      const transcription = await transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: "..." });
       if ("error" in transcription) throw new Error(transcription.error);
       return { ...analyseReadingText(input.expectedText, transcription.text, input.durationSeconds), transcriptionStatus: "transcribed" as const };
     }),

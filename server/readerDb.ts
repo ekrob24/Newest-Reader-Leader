@@ -12,6 +12,7 @@ import {
   provisionalMatchReviews,
   readerClasses,
   readingExercises,
+  readingMaterialDetails,
   readingMaterials,
   readingSessions,
   quizAttempts,
@@ -20,6 +21,7 @@ import {
   teacherTermPresets,
   weeklyReadingGoals,
   type ExerciseSet,
+  type MaterialRightsSource,
   type QuizAnswer,
   type StoredIntervention,
   type AssessmentMode,
@@ -34,6 +36,7 @@ import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
+import { analyseReadingText } from "./reader";
 
 export type AuthenticatedReader = { id: number; role: AccountRole };
 
@@ -297,27 +300,97 @@ export async function mayAccessChildProfile(viewer: AuthenticatedReader, childPr
   return false;
 }
 
-export async function createReadingMaterial(input: { teacherUserId: number; title: string; readingLevel: string; summary?: string; sourceText: string; sourceFilename?: string; storageKey?: string }) {
+export async function createReadingMaterial(input: { teacherUserId: number; title: string; readingLevel: string; summary?: string; sourceText: string; author: string; rightsSource: MaterialRightsSource; interestAge: string; genre: string; sourceFilename?: string; storageKey?: string }) {
   const db = await requireDb();
-  await db.insert(readingMaterials).values(input);
-  const [material] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, input.teacherUserId), eq(readingMaterials.title, input.title))).orderBy(desc(readingMaterials.id)).limit(1);
-  if (!material) throw new Error("Could not save reading material.");
-  return material;
+  const { author, rightsSource, interestAge, genre, ...materialInput } = input;
+  return db.transaction(async transaction => {
+    await transaction.insert(readingMaterials).values(materialInput);
+    const [material] = await transaction.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, input.teacherUserId), eq(readingMaterials.title, input.title))).orderBy(desc(readingMaterials.id)).limit(1);
+    if (!material) throw new Error("Could not save reading material.");
+    await transaction.insert(readingMaterialDetails).values({ materialId: material.id, author, rightsSource, interestAge, genre });
+    const [details] = await transaction.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, material.id)).limit(1);
+    if (!details) throw new Error("Could not save reading material details.");
+    return { ...material, details };
+  });
 }
 
 export async function listTeacherMaterials(teacherUserId: number) {
   const db = await requireDb();
-  return db.select().from(readingMaterials).where(eq(readingMaterials.teacherUserId, teacherUserId)).orderBy(desc(readingMaterials.createdAt));
+  const materials = await db.select().from(readingMaterials).where(eq(readingMaterials.teacherUserId, teacherUserId)).orderBy(desc(readingMaterials.createdAt));
+  if (!materials.length) return [];
+  const details = await db.select().from(readingMaterialDetails).where(inArray(readingMaterialDetails.materialId, materials.map(material => material.id)));
+  return materials.map(material => ({ ...material, details: details.find(item => item.materialId === material.id) ?? null }));
 }
 
 export async function getTeacherMaterialReview(teacherUserId: number, materialId: number) {
   const db = await requireDb();
-  const [row] = await db.select({ material: readingMaterials, exercise: readingExercises })
+  const [row] = await db.select({ material: readingMaterials, exercise: readingExercises, details: readingMaterialDetails })
     .from(readingMaterials)
     .leftJoin(readingExercises, eq(readingMaterials.id, readingExercises.materialId))
+    .leftJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
     .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
     .limit(1);
-  return row;
+  if (!row) return undefined;
+  const assignments = await db.select({ classId: materialAssignments.classId }).from(materialAssignments).where(eq(materialAssignments.materialId, materialId));
+  return { ...row, assignedClassIds: assignments.map(item => item.classId) };
+}
+
+export async function listTeacherClasses(teacherUserId: number) {
+  const db = await requireDb();
+  return db.select().from(readerClasses).where(eq(readerClasses.teacherUserId, teacherUserId)).orderBy(readerClasses.name);
+}
+
+export async function approveReadingMaterial(teacherUserId: number, materialId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus === "assignable") return row.details;
+  const approvedAt = row.details.approvedAt ?? new Date();
+  await db.update(readingMaterialDetails).set({ lifecycleStatus: "teacher_approved", approvedByUserId: teacherUserId, approvedAt, assignableAt: null }).where(eq(readingMaterialDetails.materialId, materialId));
+  const [details] = await db.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, materialId)).limit(1);
+  if (!details) throw new Error("Could not approve this reading material.");
+  return details;
+}
+
+export async function makeReadingMaterialAssignable(teacherUserId: number, materialId: number) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus === "draft") throw new Error("Approve this reading material before making it assignable.");
+  if (row.details.lifecycleStatus !== "assignable") {
+    await db.update(readingMaterialDetails).set({ lifecycleStatus: "assignable", assignableAt: new Date() }).where(eq(readingMaterialDetails.materialId, materialId));
+  }
+  await db.update(readingExercises).set({ approvedAt: new Date() }).where(eq(readingExercises.materialId, materialId));
+  const [details] = await db.select().from(readingMaterialDetails).where(eq(readingMaterialDetails.materialId, materialId)).limit(1);
+  if (!details) throw new Error("Could not make this reading material assignable.");
+  return details;
+}
+
+export async function assignReadingMaterialToClasses(teacherUserId: number, materialId: number, classIds: number[]) {
+  const db = await requireDb();
+  const [row] = await db.select({ material: readingMaterials, details: readingMaterialDetails })
+    .from(readingMaterials)
+    .innerJoin(readingMaterialDetails, eq(readingMaterials.id, readingMaterialDetails.materialId))
+    .where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId)))
+    .limit(1);
+  if (!row) throw new Error("This reading material is not available to your account or is missing required metadata.");
+  if (row.details.lifecycleStatus !== "assignable") throw new Error("Make this reading material assignable before choosing classes.");
+  const classes = await db.select().from(readerClasses).where(and(eq(readerClasses.teacherUserId, teacherUserId), inArray(readerClasses.id, classIds)));
+  if (classes.length !== classIds.length) throw new Error("Choose only classes that belong to your teacher account.");
+  await db.transaction(async transaction => {
+    await transaction.delete(materialAssignments).where(eq(materialAssignments.materialId, materialId));
+    await transaction.insert(materialAssignments).values(classes.map(readerClass => ({ classId: readerClass.id, materialId })));
+    await transaction.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, materialId));
+  });
+  return { materialId, assignedClasses: classes.map(readerClass => ({ id: readerClass.id, name: readerClass.name, joinCode: readerClass.joinCode })) };
 }
 
 export async function listAssignedMaterialsForChild(childUserId: number) {
@@ -343,18 +416,6 @@ export async function saveGeneratedExercises(materialId: number, exerciseSet: Ex
   const [exercise] = await db.select().from(readingExercises).where(eq(readingExercises.materialId, materialId)).limit(1);
   if (!exercise) throw new Error("Could not save generated exercises.");
   return exercise;
-}
-
-export async function approveExercises(teacherUserId: number, materialId: number) {
-  const db = await requireDb();
-  const [material] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.id, materialId), eq(readingMaterials.teacherUserId, teacherUserId))).limit(1);
-  if (!material) throw new Error("This reading material is not available to your class.");
-  await db.update(readingExercises).set({ approvedAt: new Date() }).where(eq(readingExercises.materialId, materialId));
-  await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, materialId));
-  const classes = await db.select().from(readerClasses).where(eq(readerClasses.teacherUserId, teacherUserId));
-  if (classes.length) {
-    await db.insert(materialAssignments).values(classes.map(readerClass => ({ classId: readerClass.id, materialId }))).onDuplicateKeyUpdate({ set: { materialId } });
-  }
 }
 
 export async function saveReadingSession(input: {
@@ -438,6 +499,29 @@ export async function getSessionPlayback(sessionId: number) {
   const session = await getSessionById(sessionId);
   if (!session) return undefined;
   return { session, wordTimings: session.wordTimings ?? [] };
+}
+
+export async function getTeacherSessionReview(sessionId: number) {
+  const db = await requireDb();
+  const [review] = await db.select({ session: readingSessions, childName: childProfiles.displayName, bookBand: childProfiles.bookBand })
+    .from(readingSessions)
+    .innerJoin(childProfiles, eq(readingSessions.childProfileId, childProfiles.id))
+    .where(eq(readingSessions.id, sessionId))
+    .limit(1);
+  return review;
+}
+
+export async function saveTeacherInterventionDecision(sessionId: number, interventionIndex: number, teacherDecision: "confirmed" | "overridden") {
+  const db = await requireDb();
+  const session = await getSessionById(sessionId);
+  if (!session) throw new Error("Reading session not found.");
+  const intervention = session.interventions[interventionIndex];
+  if (!intervention) throw new Error("Reading moment not found.");
+  const interventions = session.interventions.map((item, index) => index === interventionIndex ? { ...item, teacherDecision } : item);
+  await db.update(readingSessions).set({ interventions }).where(eq(readingSessions.id, sessionId));
+  const [updated] = await db.select().from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
+  if (!updated) throw new Error("Could not save the teacher decision.");
+  return updated;
 }
 
 export async function getAssignedMaterialForChild(childUserId: number, materialId: number) {
@@ -694,8 +778,8 @@ export async function provisionLocalDemoCohort() {
   if (!readerClass) throw new Error("Could not prepare the teacher demo class.");
   await db.insert(classEnrollments).values({ classId: readerClass.id, childProfileId: profile.id }).onDuplicateKeyUpdate({ set: { classId: readerClass.id } });
   await db.insert(familyLinks).values({ parentUserId: parent.id, childProfileId: profile.id }).onDuplicateKeyUpdate({ set: { parentUserId: parent.id } });
-  // Seed a welcoming demo plan once, while preserving any setting a teacher has saved afterwards.
-  await db.insert(learnerReadingSettings).values({ childProfileId: profile.id, defaultReadingMode: "ASSISTED_PRACTICE", targetWcpm: 112 }).onDuplicateKeyUpdate({ set: { childProfileId: profile.id } });
+  // Keep the local demo child on Irish English support so live reads use the existing accent handling.
+  await db.insert(learnerReadingSettings).values({ childProfileId: profile.id, defaultReadingMode: "ASSISTED_PRACTICE", targetWcpm: 112, languageSupport: "IRISH_ENGLISH_SUPPORT" }).onDuplicateKeyUpdate({ set: { languageSupport: "IRISH_ENGLISH_SUPPORT" } });
   const [existingMaterial] = await db.select().from(readingMaterials).where(and(eq(readingMaterials.teacherUserId, teacher.id), eq(readingMaterials.title, "The Lantern in the Garden"))).limit(1);
   const material = existingMaterial ?? (await (async () => {
     await db.insert(readingMaterials).values({ teacherUserId: teacher.id, title: "The Lantern in the Garden", readingLevel: "Level 3 · Sky Blue", sourceText: "Amina carried a little lantern into the garden at dusk. The light made golden circles on the path. Near the tall gate, she saw a hedgehog sniffing beside the flowers. Amina stood very still, then watched it hurry safely under the hedge.", status: "assigned" });
@@ -703,22 +787,37 @@ export async function provisionLocalDemoCohort() {
     if (!created) throw new Error("Could not prepare the assigned demo passage.");
     return created;
   })());
+  const demoMaterialDetails = { materialId: material.id, author: "Reader Leader demo team", rightsSource: "original" as const, interestAge: "Ages 8–10", genre: "Nature fiction", lifecycleStatus: "assignable" as const, approvedByUserId: teacher.id, approvedAt: new Date(), assignableAt: new Date() };
+  await db.insert(readingMaterialDetails).values(demoMaterialDetails).onDuplicateKeyUpdate({ set: demoMaterialDetails });
   const exerciseSet: ExerciseSet = { vocabulary: [{ word: "lantern", childFriendlyMeaning: "a small lamp you can carry" }, { word: "dusk", childFriendlyMeaning: "the time when daylight is fading" }, { word: "hedgehog", childFriendlyMeaning: "a small animal with tiny spines" }], questions: [{ prompt: "What did Amina carry into the garden?", options: ["A lantern", "A kite", "A basket"], answer: "A lantern", explanation: "The story says Amina carried a little lantern." }, { prompt: "What animal did Amina see?", options: ["A hedgehog", "A fox", "A rabbit"], answer: "A hedgehog", explanation: "A hedgehog was sniffing beside the flowers." }, { prompt: "How did Amina help the animal?", options: ["She stood still", "She chased it", "She picked it up"], answer: "She stood still", explanation: "Amina stood very still and watched it safely." }], activity: "Draw the golden circles the lantern made, then tell someone which detail you remember." };
   await db.insert(readingExercises).values({ materialId: material.id, exerciseSet, modelName: "teacher-demo", approvedAt: new Date() }).onDuplicateKeyUpdate({ set: { exerciseSet, approvedAt: new Date() } });
   await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, material.id));
   await db.insert(materialAssignments).values({ classId: readerClass.id, materialId: material.id }).onDuplicateKeyUpdate({ set: { materialId: material.id } });
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, profile.id)).limit(1);
   if (!existingSession) await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", transcript: "Amina carried a little lantern into the garden at dusk.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 72, completed: 1, practiceWords: ["lantern", "hedgehog"], interventions: [{ word: "hedgehog", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] });
+  const accentShowcaseTitle = "Accent Showcase — The Thin Path";
+  const [accentShowcaseSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, accentShowcaseTitle))).limit(1);
+  if (!accentShowcaseSeed) {
+    const expectedText = "The thin path was caught";
+    const transcript = "The tin pat was cot";
+    const durationSeconds = 30;
+    const analysis = analyseReadingText(expectedText, transcript, durationSeconds, "ASSISTED_PRACTICE", undefined, "IRISH_ENGLISH_SUPPORT");
+    const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
+    await db.insert(readingSessions).values({ childProfileId: profile.id, storyTitle: accentShowcaseTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, completed: 1, assessmentMode: analysis.mode, languageSupport: "IRISH_ENGLISH_SUPPORT", practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates });
+  }
   const [historicalTrendSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Garden Walk · June"))).limit(1);
   if (!historicalTrendSeed) await db.insert(readingSessions).values([
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", transcript: "Amina followed the path through the garden.", accuracy: 82, wordsCorrectPerMinute: 88, durationSeconds: 95, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["followed"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z") },
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", transcript: "Amina followed the path through the quiet garden.", accuracy: 87, wordsCorrectPerMinute: 96, durationSeconds: 91, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["quiet"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z") },
     { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", transcript: "Amina followed the bright garden path with confidence.", accuracy: 92, wordsCorrectPerMinute: 104, durationSeconds: 85, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["confidence"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z") },
   ]);
-  const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
-  if (!playbackFixture) {
-    const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
-    await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+  const storageConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);
+  if (storageConfigured) {
+    const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
+    if (!playbackFixture) {
+      const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
+      await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+    }
   }
   const [existingQuizAttempt] = await db.select({ id: quizAttempts.id }).from(quizAttempts).where(and(eq(quizAttempts.childProfileId, profile.id), eq(quizAttempts.materialId, material.id))).limit(1);
   if (!existingQuizAttempt) await db.insert(quizAttempts).values({ childProfileId: profile.id, materialId: material.id, score: 2, totalQuestions: 3, answers: [{ questionIndex: 0, selectedAnswer: "A lantern", correct: true }, { questionIndex: 1, selectedAnswer: "A rabbit", correct: false }, { questionIndex: 2, selectedAnswer: "She stood still", correct: true }] });

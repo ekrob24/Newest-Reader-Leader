@@ -11,9 +11,22 @@ export type MaterialRightsSource = (typeof materialRightsSourceValues)[number];
 export const materialLifecycleValues = ["draft", "teacher_approved", "assignable"] as const;
 export type MaterialLifecycle = (typeof materialLifecycleValues)[number];
 
+/** The school is the data controller; Reader Leader is the processor. Every tenant-scoped
+ *  row hangs off one school so that erasing a school is a single delete per table. */
+export const schools = mysqlTable("schools", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  slug: varchar("slug", { length: 80 }).notNull().unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 /** Core identity managed by Manus OAuth. Roles are assigned through the Reader Leader onboarding flow. */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
+  /** Null only for a break-glass support account with no standing school
+   *  membership. A null school yields no tenant scope, so tenant queries reject it. */
+  schoolId: int("schoolId").references(() => schools.id, { onDelete: "cascade" }),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -26,6 +39,7 @@ export const users = mysqlTable("users", {
 
 export const readerClasses = mysqlTable("readerClasses", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 120 }).notNull(),
   joinCode: varchar("joinCode", { length: 12 }).notNull().unique(),
@@ -36,6 +50,7 @@ export const readerClasses = mysqlTable("readerClasses", {
 /** Teacher-approved transcript variants apply to one of their Irish English-enabled classes. */
 export const educatorApprovedIrishVariants = mysqlTable("educatorApprovedIrishVariants", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   classId: int("classId").notNull().references(() => readerClasses.id, { onDelete: "cascade" }),
   expectedWord: varchar("expectedWord", { length: 80 }).notNull(),
@@ -47,6 +62,7 @@ export const educatorApprovedIrishVariants = mysqlTable("educatorApprovedIrishVa
 /** A reusable, teacher-owned assessment-reporting range. Dates are stored as ISO calendar days. */
 export const teacherTermPresets = mysqlTable("teacherTermPresets", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 80 }).notNull(),
   startDate: varchar("startDate", { length: 10 }).notNull(),
@@ -55,8 +71,12 @@ export const teacherTermPresets = mysqlTable("teacherTermPresets", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [unique("teacher_term_preset_name_unique").on(table.teacherUserId, table.name)]);
 
+/** Presentation only. `schoolName` is a legacy per-teacher copy kept so the demo-visible PDF
+ *  report header keeps working; `schools.name` is authoritative and new code must read that.
+ *  Folding this column into `schools` is a separate change. */
 export const schoolBranding = mysqlTable("schoolBranding", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   schoolName: varchar("schoolName", { length: 120 }).notNull().default("Reader Leader School"),
   accentColor: varchar("accentColor", { length: 12 }).notNull().default("#2563EB"),
@@ -66,6 +86,7 @@ export const schoolBranding = mysqlTable("schoolBranding", {
 
 export const childProfiles = mysqlTable("childProfiles", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   userId: int("userId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   displayName: varchar("displayName", { length: 80 }).notNull(),
   bookBand: varchar("bookBand", { length: 80 }).notNull().default("Level 3 · Sky Blue"),
@@ -77,6 +98,7 @@ export const childProfiles = mysqlTable("childProfiles", {
 /** Teacher-configured defaults and supportive pace target for one learner. */
 export const learnerReadingSettings = mysqlTable("learnerReadingSettings", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().unique().references(() => childProfiles.id, { onDelete: "cascade" }),
   defaultReadingMode: mysqlEnum("defaultReadingMode", assessmentModeValues).notNull().default("ASSISTED_PRACTICE"),
   targetWcpm: int("targetWcpm").notNull().default(100),
@@ -87,6 +109,7 @@ export const learnerReadingSettings = mysqlTable("learnerReadingSettings", {
 /** A teacher-owned weekly reading target for one learner. Progress is derived from saved sessions. */
 export const weeklyReadingGoals = mysqlTable("weeklyReadingGoals", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   weekStart: varchar("weekStart", { length: 10 }).notNull(),
@@ -99,6 +122,7 @@ export const weeklyReadingGoals = mysqlTable("weeklyReadingGoals", {
 
 export const classEnrollments = mysqlTable("classEnrollments", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   classId: int("classId").notNull().references(() => readerClasses.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -106,6 +130,7 @@ export const classEnrollments = mysqlTable("classEnrollments", {
 
 export const familyLinks = mysqlTable("familyLinks", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   parentUserId: int("parentUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -114,6 +139,7 @@ export const familyLinks = mysqlTable("familyLinks", {
 /** One parent-managed, three-step home-practice checklist per linked learner and UTC calendar day. */
 export const homePracticeChecklists = mysqlTable("homePracticeChecklists", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   parentUserId: int("parentUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   checklistDate: varchar("checklistDate", { length: 10 }).notNull(),
@@ -125,6 +151,7 @@ export const homePracticeChecklists = mysqlTable("homePracticeChecklists", {
 /** An in-app notification is created once when a linked parent completes a learner's daily checklist. */
 export const parentReminders = mysqlTable("parentReminders", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   parentUserId: int("parentUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   checklistId: int("checklistId").notNull().unique().references(() => homePracticeChecklists.id, { onDelete: "cascade" }),
@@ -137,6 +164,7 @@ export const parentReminders = mysqlTable("parentReminders", {
 
 export const readingMaterials = mysqlTable("readingMaterials", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: varchar("title", { length: 180 }).notNull(),
   readingLevel: varchar("readingLevel", { length: 80 }).notNull(),
@@ -152,6 +180,7 @@ export const readingMaterials = mysqlTable("readingMaterials", {
 /** Breadth-layer metadata and approval state for teacher-contributed texts. */
 export const readingMaterialDetails = mysqlTable("readingMaterialDetails", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   materialId: int("materialId").notNull().unique().references(() => readingMaterials.id, { onDelete: "cascade" }),
   author: varchar("author", { length: 180 }).notNull(),
   rightsSource: mysqlEnum("rightsSource", materialRightsSourceValues).notNull(),
@@ -170,6 +199,7 @@ export type ExerciseSet = { vocabulary: { word: string; childFriendlyMeaning: st
 
 export const readingExercises = mysqlTable("readingExercises", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   materialId: int("materialId").notNull().unique().references(() => readingMaterials.id, { onDelete: "cascade" }),
   exerciseSet: json("exerciseSet").$type<ExerciseSet>().notNull(),
   modelName: varchar("modelName", { length: 80 }).notNull(),
@@ -179,6 +209,7 @@ export const readingExercises = mysqlTable("readingExercises", {
 
 export const materialAssignments = mysqlTable("materialAssignments", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   classId: int("classId").notNull().references(() => readerClasses.id, { onDelete: "cascade" }),
   materialId: int("materialId").notNull().references(() => readingMaterials.id, { onDelete: "cascade" }),
   assignedAt: timestamp("assignedAt").defaultNow().notNull(),
@@ -190,6 +221,7 @@ export type StoredWordTiming = { id: string; text: string; startMs: number; endM
 
 export const readingSessions = mysqlTable("readingSessions", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   materialId: int("materialId").references(() => readingMaterials.id, { onDelete: "set null" }),
   storyTitle: varchar("storyTitle", { length: 180 }).notNull(),
@@ -211,6 +243,7 @@ export const readingSessions = mysqlTable("readingSessions", {
 /** Each Irish English provisional transcript match remains confirmable by an authorised teacher. */
 export const provisionalMatchReviews = mysqlTable("provisionalMatchReviews", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   sessionId: int("sessionId").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   classId: int("classId").references(() => readerClasses.id, { onDelete: "set null" }),
@@ -225,6 +258,7 @@ export const provisionalMatchReviews = mysqlTable("provisionalMatchReviews", {
 
 export const sessionComments = mysqlTable("sessionComments", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   sessionId: int("sessionId").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   comment: text("comment").notNull(),
@@ -235,6 +269,7 @@ export type QuizAnswer = { questionIndex: number; selectedAnswer: string; correc
 
 export const quizAttempts = mysqlTable("quizAttempts", {
   id: int("id").autoincrement().primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   materialId: int("materialId").notNull().references(() => readingMaterials.id, { onDelete: "cascade" }),
   answers: json("answers").$type<QuizAnswer[]>().notNull(),
@@ -248,3 +283,4 @@ export type InsertUser = typeof users.$inferInsert;
 export type ReadingMaterial = typeof readingMaterials.$inferSelect;
 export type ReadingMaterialDetails = typeof readingMaterialDetails.$inferSelect;
 export type ReadingSession = typeof readingSessions.$inferSelect;
+export type School = typeof schools.$inferSelect;

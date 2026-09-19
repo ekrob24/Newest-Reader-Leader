@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { childProfiles, classEnrollments, educatorApprovedIrishVariants, learnerReadingSettings, provisionalMatchReviews, readerClasses, readingSessions, users } from "../drizzle/schema";
 import { getDb } from "./db";
+import { ensureTestSchool } from "./tenancyFixture";
 import { addLearnerToTeacherClass, approveIrishVariantForClass, confirmProvisionalMatchReview, createAdditionalClassForTeacher, createProvisionalMatchReviews, getLearnerReadingSettings, getTeacherClassVariationReview, getTeacherIrishVariantExport, listEducatorApprovedIrishVariants, listTeacherProvisionalMatches, saveClassLanguageSupportDefault, saveReadingSession } from "./readerDb";
 
 const databaseAvailable = Boolean(process.env.DATABASE_URL);
@@ -17,7 +18,7 @@ describe.skipIf(!databaseAvailable)("Irish English educator approval workflow", 
     let childProfileId: number | undefined;
     let classId: number | undefined;
     try {
-      await db.insert(users).values({ openId: `${key}-t`, name: "Irish Approval Teacher", loginMethod: "vitest", role: "teacher" });
+      await db.insert(users).values({ schoolId: await ensureTestSchool(`school-${key}`), openId: `${key}-t`, name: "Irish Approval Teacher", loginMethod: "vitest", role: "teacher" });
       const [teacher] = await db.select().from(users).where(eq(users.openId, `${key}-t`)).limit(1);
       if (!teacher) throw new Error("Could not create the teacher test account.");
       teacherId = teacher.id;

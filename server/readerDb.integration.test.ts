@@ -1,19 +1,21 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { childProfiles, classEnrollments, familyLinks, homePracticeChecklists, learnerReadingSettings, materialAssignments, parentReminders, readerClasses, teacherTermPresets, users, weeklyReadingGoals } from "../drizzle/schema";
+import { childProfiles, classEnrollments, familyLinks, homePracticeChecklists, learnerReadingSettings, materialAssignments, parentReminders, readerClasses, schools, teacherTermPresets, users, weeklyReadingGoals } from "../drizzle/schema";
 import { getDb } from "./db";
-import { addLearnerToTeacherClass, addLearnersToTeacherClass, approveReadingMaterial, assignReadingMaterialToClasses, createAdditionalClassForTeacher, createReadingMaterial, currentWeekStart, deleteTeacherTermPreset, getLearnerReadingSettings, getTeacherDashboard, listParentReminders, listTeacherTermPresets, makeReadingMaterialAssignable, markAllParentRemindersRead, markParentReminderRead, saveHomePracticeChecklist, saveLearnerReadingSettings, saveTeacherTermPreset, saveWeeklyReadingGoal } from "./readerDb";
+import { ensureTestSchool } from "./tenancyFixture";
+import { MissingTenantScopeError, addLearnerToTeacherClass, addLearnersToTeacherClass, approveReadingMaterial, assignReadingMaterialToClasses, createAdditionalClassForTeacher, createReadingMaterial, currentWeekStart, deleteTeacherTermPreset, getLearnerReadingSettings, getTeacherDashboard, listParentReminders, listTeacherTermPresets, makeReadingMaterialAssignable, markAllParentRemindersRead, markParentReminderRead, saveHomePracticeChecklist, saveLearnerReadingSettings, saveTeacherTermPreset, saveWeeklyReadingGoal } from "./readerDb";
 
 const databaseAvailable = Boolean(process.env.DATABASE_URL);
 const testKey = `rlt-${crypto.randomUUID()}`;
 const createdUserIds: number[] = [];
 const createdClassIds: number[] = [];
 const createdParentIds: number[] = [];
+const testSchoolId = async () => ensureTestSchool(`school-${testKey}`);
 
 async function insertUser(openId: string, name: string, role: "teacher" | "child" | "parent") {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable for integration coverage.");
-  await db.insert(users).values({ openId, name, loginMethod: "vitest", role });
+  await db.insert(users).values({ schoolId: await testSchoolId(), openId, name, loginMethod: "vitest", role });
   const [user] = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   if (!user) throw new Error("Could not create test account.");
   createdUserIds.push(user.id);
@@ -136,10 +138,10 @@ describe.skipIf(!databaseAvailable)("Reader Leader persisted class and reminder 
     const child = await insertUser(`${testKey}-child`, "Test Child", "child");
     const db = await getDb();
     if (!db) throw new Error("Database is unavailable for integration coverage.");
-    await db.insert(childProfiles).values({ userId: child.id, displayName: "Test Child", bookBand: "Level 3 · Sky Blue", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
+    await db.insert(childProfiles).values({ schoolId: await testSchoolId(), userId: child.id, displayName: "Test Child", bookBand: "Level 3 · Sky Blue", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
     const [profile] = await db.select().from(childProfiles).where(eq(childProfiles.userId, child.id)).limit(1);
     if (!profile) throw new Error("Could not create test learner profile.");
-    await db.insert(familyLinks).values({ parentUserId: parent.id, childProfileId: profile.id });
+    await db.insert(familyLinks).values({ schoolId: await testSchoolId(), parentUserId: parent.id, childProfileId: profile.id });
 
     const firstCompletion = await saveHomePracticeChecklist(parent.id, profile.id, [true, true, true], new Date("2026-09-03T12:00:00.000Z"));
     expect(firstCompletion.reminderCreated).toBe(true);
@@ -156,14 +158,78 @@ describe.skipIf(!databaseAvailable)("Reader Leader persisted class and reminder 
     expect(await listParentReminders(parent.id)).toHaveLength(1);
 
     const secondChild = await insertUser(`${testKey}-child-two`, "Second Test Child", "child");
-    await db.insert(childProfiles).values({ userId: secondChild.id, displayName: "Second Test Child", bookBand: "Level 4 · Gold", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
+    await db.insert(childProfiles).values({ schoolId: await testSchoolId(), userId: secondChild.id, displayName: "Second Test Child", bookBand: "Level 4 · Gold", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
     const [secondProfile] = await db.select().from(childProfiles).where(eq(childProfiles.userId, secondChild.id)).limit(1);
     if (!secondProfile) throw new Error("Could not create second test learner profile.");
-    await db.insert(familyLinks).values({ parentUserId: parent.id, childProfileId: secondProfile.id });
+    await db.insert(familyLinks).values({ schoolId: await testSchoolId(), parentUserId: parent.id, childProfileId: secondProfile.id });
     await saveHomePracticeChecklist(parent.id, secondProfile.id, [true, true, true], new Date("2026-09-04T12:00:00.000Z"));
     expect(await listParentReminders(parent.id, { childProfileId: secondProfile.id })).toEqual([expect.objectContaining({ childProfileId: secondProfile.id })]);
     const notificationDate = new Date().toISOString().slice(0, 10);
     expect(await listParentReminders(parent.id, { startDate: notificationDate, endDate: notificationDate })).toEqual(expect.arrayContaining([expect.objectContaining({ childProfileId: secondProfile.id })]));
     expect(await listParentReminders(parent.id, { startDate: "2099-01-01", endDate: "2099-01-01" })).toEqual([]);
+  });
+});
+
+describe.skipIf(!databaseAvailable)("School tenancy", () => {
+  it("refuses to create school data for an account with no school", async () => {
+    const db = await getDb();
+    if (!db) throw new Error("Database is unavailable for integration coverage.");
+    // A break-glass support engineer has no standing school membership, so there is no scope
+    // to write into. The account exists and is a teacher; only the school is absent.
+    const openId = `${testKey}-support-no-school`;
+    await db.insert(users).values({ schoolId: null, openId, name: "Support Engineer", loginMethod: "vitest", role: "teacher" });
+    const [support] = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+    if (!support) throw new Error("Could not create the school-less test account.");
+    createdUserIds.push(support.id);
+    expect(support.schoolId).toBeNull();
+
+    await expect(createAdditionalClassForTeacher(support.id, "No School Owls", `T${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`))
+      .rejects.toBeInstanceOf(MissingTenantScopeError);
+    await expect(saveTeacherTermPreset(support.id, { name: "No School Term", startDate: "2026-09-01", endDate: "2026-12-18" }))
+      .rejects.toBeInstanceOf(MissingTenantScopeError);
+  });
+
+  it("keeps one school's rows out of another school's reads", async () => {
+    const db = await getDb();
+    if (!db) throw new Error("Database is unavailable for integration coverage.");
+    const [schoolA, schoolB] = [await ensureTestSchool(`iso-a-${testKey}`), await ensureTestSchool(`iso-b-${testKey}`)];
+    expect(schoolA).not.toBe(schoolB);
+
+    const makeTeacher = async (suffix: string, schoolId: number) => {
+      const openId = `${testKey}-${suffix}`;
+      await db.insert(users).values({ schoolId, openId, name: `Teacher ${suffix}`, loginMethod: "vitest", role: "teacher" });
+      const [teacher] = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+      if (!teacher) throw new Error("Could not create the tenancy test teacher.");
+      createdUserIds.push(teacher.id);
+      return teacher;
+    };
+    const teacherA = await makeTeacher("iso-teacher-a", schoolA);
+    const teacherB = await makeTeacher("iso-teacher-b", schoolB);
+
+    const classA = await createAdditionalClassForTeacher(teacherA.id, "School A Owls", `T${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`);
+    const classB = await createAdditionalClassForTeacher(teacherB.id, "School B Owls", `T${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`);
+    createdClassIds.push(classA.id, classB.id);
+    expect(classA.schoolId).toBe(schoolA);
+    expect(classB.schoolId).toBe(schoolB);
+
+    const learnerA = await addLearnerToTeacherClass({ teacherUserId: teacherA.id, classId: classA.id, displayName: "Learner A", bookBand: "Level 3 · Sky Blue", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
+    const learnerB = await addLearnerToTeacherClass({ teacherUserId: teacherB.id, classId: classB.id, displayName: "Learner B", bookBand: "Level 3 · Sky Blue", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
+    createdUserIds.push(learnerA.profile.userId, learnerB.profile.userId);
+
+    // A learner added under school B carries school B, and school A's dashboard never sees them.
+    expect(learnerA.profile.schoolId).toBe(schoolA);
+    expect(learnerB.profile.schoolId).toBe(schoolB);
+    const dashboardA = await getTeacherDashboard(teacherA.id);
+    const dashboardB = await getTeacherDashboard(teacherB.id);
+    expect(dashboardA.pupils.map(pupil => pupil.childProfileId)).toContain(learnerA.profile.id);
+    expect(dashboardA.pupils.map(pupil => pupil.childProfileId)).not.toContain(learnerB.profile.id);
+    expect(dashboardB.pupils.map(pupil => pupil.childProfileId)).not.toContain(learnerA.profile.id);
+
+    // Erasing a school is one delete, and it takes that school's rows and only that school's.
+    await db.delete(schools).where(eq(schools.id, schoolB));
+    expect(await db.select().from(readerClasses).where(eq(readerClasses.id, classB.id))).toHaveLength(0);
+    expect(await db.select().from(childProfiles).where(eq(childProfiles.id, learnerB.profile.id))).toHaveLength(0);
+    expect(await db.select().from(readerClasses).where(eq(readerClasses.id, classA.id))).toHaveLength(1);
+    expect(await db.select().from(childProfiles).where(eq(childProfiles.id, learnerA.profile.id))).toHaveLength(1);
   });
 });

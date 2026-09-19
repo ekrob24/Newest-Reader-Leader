@@ -31,14 +31,14 @@
  *  - A table absent from TENANT_TABLES. Unknown tables throw rather than pass unfiltered, so
  *    adding a table forces a tenancy decision instead of silently inheriting none.
  */
-import { and, eq, type SQL } from "drizzle-orm";
+import { and, eq, getTableName, type SQL } from "drizzle-orm";
 import type { MySqlTable } from "drizzle-orm/mysql-core";
 import {
   childProfiles, classEnrollments, educatorApprovedIrishVariants, familyLinks,
   homePracticeChecklists, learnerReadingSettings, materialAssignments, parentReminders,
   provisionalMatchReviews, quizAttempts, readerClasses, readingExercises,
   readingMaterialDetails, readingMaterials, readingSessions, schoolBranding, schools,
-  sessionComments, teacherTermPresets, users, weeklyReadingGoals,
+  readingWords, sessionComments, teacherTermPresets, users, weeklyReadingGoals,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -77,6 +77,7 @@ const TENANT_TABLES = new Map<unknown, (scope: TenantScope) => SQL>([
   [readingMaterialDetails, s => eq(readingMaterialDetails.schoolId, s.schoolId)],
   [readingMaterials, s => eq(readingMaterials.schoolId, s.schoolId)],
   [readingSessions, s => eq(readingSessions.schoolId, s.schoolId)],
+  [readingWords, s => eq(readingWords.schoolId, s.schoolId)],
   [schoolBranding, s => eq(schoolBranding.schoolId, s.schoolId)],
   [sessionComments, s => eq(sessionComments.schoolId, s.schoolId)],
   [teacherTermPresets, s => eq(teacherTermPresets.schoolId, s.schoolId)],
@@ -90,8 +91,14 @@ const TENANT_TABLES = new Map<unknown, (scope: TenantScope) => SQL>([
 const SCOPE_COLUMN = "schoolId";
 
 function tableName(table: unknown) {
-  const described = table as { _?: { name?: string } };
-  return described?._?.name ?? "unknown";
+  // Drizzle keeps the table name behind a symbol, not on `_.name`, so reading `_.name`
+  // returned "unknown" for every table in the schema — leaving the guard able to say a table
+  // was unregistered but not which one.
+  try {
+    return getTableName(table as MySqlTable);
+  } catch {
+    return "unknown";
+  }
 }
 
 function tenantPredicate(table: unknown, scope: TenantScope): SQL {

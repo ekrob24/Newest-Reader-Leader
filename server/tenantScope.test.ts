@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { drizzle } from "drizzle-orm/mysql2";
-import { eq } from "drizzle-orm";
+import { eq, getTableName, is } from "drizzle-orm";
+import { MySqlTable, int, mysqlTable } from "drizzle-orm/mysql-core";
+import * as schema from "../drizzle/schema";
 import {
   childProfiles, classEnrollments, materialAssignments, readerClasses, readingExercises,
   readingMaterials, readingSessions, schools,
@@ -109,5 +111,30 @@ describe("tenant seam — refusals", () => {
   it("refuses a table that has not declared its tenancy", () => {
     const undeclared = {} as never;
     expect(() => db.select().from(undeclared)).toThrow(UnknownTenantTableError);
+  });
+});
+
+
+describe("every table in the schema declares whether it is tenant-scoped", () => {
+  const tables = Object.values(schema).filter(value => is(value, MySqlTable)) as MySqlTable[];
+
+  it("can be read through the seam, table by table", () => {
+    // readingWords was added to the schema and not to TENANT_TABLES. Insert does not consult
+    // the registry, so writes worked and the table was simply unreadable: every select,
+    // update and delete through the seam threw. Walking the schema is what makes this a
+    // guard rather than a list someone has to remember to update.
+    expect(tables.length).toBeGreaterThan(20);
+    const unreadable = tables.filter(table => {
+      try { db.select().from(table); return false; } catch { return true; }
+    }).map(table => getTableName(table));
+    expect(unreadable).toEqual([]);
+  });
+
+  it("names the offending table when one really is unregistered", () => {
+    // The guard reported every table as "unknown", so it could say something was wrong but
+    // not what — which is most of the value of the message.
+    const stray = mysqlTable("strayTable", { id: int("id").primaryKey() });
+    expect(() => db.select().from(stray)).toThrowError(UnknownTenantTableError);
+    expect(() => db.select().from(stray)).toThrowError(/strayTable/);
   });
 });

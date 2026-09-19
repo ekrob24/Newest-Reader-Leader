@@ -113,8 +113,9 @@ test("the demo journey", async ({ page, context }) => {
   await expect(page.getByText(/Ms Kelly.s Reading Class/)).toBeVisible();
 
   // 8. The class is in a reviewable state: the learner and their flagged reading moments are
-  //    on screen. This is where the journey stops, because the review queue below it is not
-  //    reachable in the running app — see DEMO_RUNBOOK.md, "What the demo does not show".
+  //    on screen. The journey stops here because the per-word confirm/override screen,
+  //    TeacherSessionReviewScreen, is not routed — the pending-speech-match confirmation is
+  //    the reachable teacher decision. See DEMO_RUNBOOK.md, "What the demo does not show".
   await expect(page.getByText(/Speech Review Panel/i)).toBeVisible();
   await expect(page.getByText(/flagged moments/i)).toBeVisible();
   await expect(page.getByText(/Amina/).first()).toBeVisible();

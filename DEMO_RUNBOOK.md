@@ -83,6 +83,17 @@ Two things it needs:
 - `READER_LEADER_RECORD=1`, which `pnpm demo:record` sets. Video, the trace and the pauses are
   off in every other run, so CI neither films itself nor uploads a video.
 
+## Running it on your own machine
+
+macOS or Linux: `./scripts/run-local.sh`
+Windows PowerShell: `.\scripts\run-local.ps1`
+
+Both install, migrate, seed, build and start in one go. They need Node 22, pnpm and a MySQL 8
+on 127.0.0.1:3306; the Windows one tells you the `docker run` command if no MySQL is listening.
+
+Open **http://localhost:3100**, not 127.0.0.1 — browsers only grant microphone access on
+localhost or HTTPS.
+
 ## Deploying it somewhere people can click
 
 See `DEPLOY_PREVIEW.md`. It is a dashboard checklist, not a code change: region, database,

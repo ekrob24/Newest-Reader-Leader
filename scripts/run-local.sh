@@ -10,6 +10,8 @@
 #
 # Needs Node 22, pnpm, and a MySQL 8 you can reach. Override the connection if yours differs:
 #   DATABASE_URL='mysql://user:pass@127.0.0.1:3306/reader_leader_local' ./scripts/run-local.sh
+#
+# On Windows use scripts/run-local.ps1 instead.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

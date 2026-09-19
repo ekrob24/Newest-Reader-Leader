@@ -72,8 +72,10 @@ describe("tenant seam — writes", () => {
   });
 
   it("refuses a row that names a different school", () => {
-    expect(() => db.insert(readerClasses).values({ schoolId: 9, teacherUserId: 1, name: "Owls", joinCode: "X" }))
-      .toThrow(MissingTenantScopeError);
+    // The type already forbids naming schoolId — TenantInsertValues omits it — so this cast is
+    // the point of the test: a caller who defeats the type still cannot defeat the runtime.
+    const crossSchool = { schoolId: 9, teacherUserId: 1, name: "Owls", joinCode: "X" } as unknown as Parameters<ReturnType<typeof db.insert<typeof readerClasses>>["values"]>[0];
+    expect(() => db.insert(readerClasses).values(crossSchool)).toThrow(MissingTenantScopeError);
   });
 
   it("constrains update and delete", () => {

@@ -32,7 +32,8 @@ async function seedSchool(slug: string, name: string, sessions: StoredInterventi
   await db.insert(childProfiles).values({ schoolId, userId: child.id, displayName: "Learner", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
   const [profile] = await db.select().from(childProfiles).where(eq(childProfiles.userId, child.id)).limit(1);
   if (!profile) throw new Error("Could not create the fairness fixture profile.");
-  for (const [index, interventions] of sessions.entries()) {
+  for (let index = 0; index < sessions.length; index += 1) {
+    const interventions = sessions[index];
     await db.insert(readingSessions).values({
       schoolId, childProfileId: profile.id, storyTitle: `${name} ${index}`, transcript: "t",
       accuracy: 90, wordsCorrectPerMinute: 100, durationSeconds: 60,

@@ -255,7 +255,11 @@ export const readerLeaderRouter = router({
       expectedText: z.string().min(20).max(8000),
       audioBase64: z.string().min(1).max(6_000_000),
       audioMime: z.string().optional(),
-      durationSeconds: z.number().int().min(10).max(900),
+      // Recorded, not validated. A save must never be rejected over how long the reading
+      // took: hasChildReadingEvidence already decides whether a reading happened, and a
+      // bound here only turns a legitimate read into a silent 400. The remaining range is
+      // a sanity bound on the payload — a broken clock, not a judgement about the child.
+      durationSeconds: z.number().int().min(0).max(86_400),
       fallbackTranscript: z.string().max(8000).optional().default(""),
       assessmentMode: assessmentModeSchema.default("ASSISTED_PRACTICE"),
       wordStates: z.array(wordStateSchema).max(1000).optional(),
@@ -298,7 +302,11 @@ export const readerLeaderRouter = router({
       storyTitle: z.string().min(3).max(180),
       expectedText: z.string().min(20).max(8000),
       transcript: z.string().min(1).max(8000),
-      durationSeconds: z.number().int().min(10).max(900),
+      // Recorded, not validated. A save must never be rejected over how long the reading
+      // took: hasChildReadingEvidence already decides whether a reading happened, and a
+      // bound here only turns a legitimate read into a silent 400. The remaining range is
+      // a sanity bound on the payload — a broken clock, not a judgement about the child.
+      durationSeconds: z.number().int().min(0).max(86_400),
       assessmentMode: assessmentModeSchema.default("ASSISTED_PRACTICE"),
       wordStates: z.array(wordStateSchema).max(1000).optional(),
       demoInterventions: z.array(z.object({ word: z.string().min(1).max(80), action: z.enum(["prompt", "model", "stay_silent", "teacher_review"]), note: z.string().min(1).max(300) })).max(3).optional().default([]),

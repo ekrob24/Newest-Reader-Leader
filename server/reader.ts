@@ -1,4 +1,5 @@
 import type { AssessmentMode, StoredWordState } from "../drizzle/schema";
+import { isPaceMeaningful } from "../shared/readingPace";
 import { matchExpectedReadingWord, type EducatorApprovedIrishVariant, type ReadingLanguageSupport } from "../shared/dialectSupport";
 
 export type ReadingEventKind = "correct" | "dialect_variation" | "substitution" | "omission" | "insertion" | "repetition";
@@ -7,7 +8,9 @@ export type WordState = StoredWordState;
 
 export type ReadingAnalysis = {
   transcript: string; mode: AssessmentMode; accuracy: number; firstPassAccuracy: number; pace: number; firstPassWcpm: number;
-  correctWords: number; firstPassCorrectWords: number; totalWords: number; durationSeconds: number; practiceWords: string[];
+  correctWords: number; firstPassCorrectWords: number; totalWords: number; durationSeconds: number;
+  /** False when the read was too short for words-per-minute to carry meaning. */
+  paceReliable: boolean; practiceWords: string[];
   events: ReadingEvent[]; wordStates: WordState[]; retrySummary: { word: string; retries: number }[]; selfCorrections: string[];
   modelWords: string[]; childMessage: string; nextStep: string;
 };
@@ -66,7 +69,13 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
   const skippedPracticeWords = resolvedStates.filter(state => state.status === "incorrect" && state.attempts >= 3).map(state => state.text);
   const practiceWords = mode === "MONTHLY_ASSESSMENT" ? [] : Array.from(new Set([...skippedPracticeWords, ...notableEvents.map(event => event.expectedWord)].filter(word => word.length > 3))).slice(0, 3);
   const modelWords = mode === "GUIDED_PRACTICE" ? resolvedStates.filter(state => state.status === "incorrect" && state.attempts >= 2).map(state => state.text) : [];
-  const effectiveDuration = Math.max(20, Math.round(durationSeconds || 60));
+  // Record the duration as it was read and guard only the division. The previous floor of
+  // twenty seconds rewrote a short read into a longer one, so a three-second reading was
+  // stored and shown to a teacher as "20s" with a WCPM to match: a fabricated number in the
+  // record, invented to keep the pace figure inside a comfortable range. A short sample is
+  // now reported as a short sample instead.
+  const recordedDuration = Math.max(0, Math.round(Number.isFinite(durationSeconds) ? durationSeconds : 0));
+  const effectiveDuration = Math.max(1, recordedDuration);
   const firstPassAccuracy = expected.length ? Math.round((firstPassCorrectWords / expected.length) * 100) : 0;
   const assistedAccuracy = expected.length ? Math.round((correctWords / expected.length) * 100) : 0;
   const accuracy = mode === "MONTHLY_ASSESSMENT" ? firstPassAccuracy : assistedAccuracy;
@@ -74,7 +83,7 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
   const pace = mode === "MONTHLY_ASSESSMENT" ? firstPassWcpm : Math.max(0, Math.round((correctWords / effectiveDuration) * 60));
   const childMessage = mode === "MONTHLY_ASSESSMENT" ? "You completed your monthly reading check with calm focus. Your teacher will review it with you." : selfCorrections.length ? "You noticed a tricky word and had another go. That is what thoughtful readers do." : accuracy >= 92 ? "Wonderful focus. You kept the story moving and made your voice clear." : "You stayed with a tricky text, and that is how strong readers grow.";
   const nextStep = mode === "MONTHLY_ASSESSMENT" ? "No correction prompts were used during this first-pass reading check." : practiceWords[0] ? `Try “${displayWord(practiceWords[0])}” slowly once, then pop it back into the sentence.` : "Choose one sentence you enjoyed and read it again with a smooth, steady voice.";
-  return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: effectiveDuration, practiceWords, events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
+  return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: recordedDuration, paceReliable: isPaceMeaningful(recordedDuration), practiceWords, events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
 }
 
 export type ReaderRole = "child" | "teacher" | "parent";

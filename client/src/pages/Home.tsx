@@ -219,7 +219,10 @@ export default function Home() {
     finishWithReport(createGuidedReport(selectedStory, liveTranscriptRef.current.trim(), elapsed, assessmentMode, wordStates));
   }
   async function sendRecording(blob: Blob) {
-    const elapsed = Math.max(20, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000));
+    // Report the reading time that actually elapsed. This used to be raised to twenty
+    // seconds to clear the server's old minimum, which meant a short read was sent, stored
+    // and shown to a teacher as a twenty-second one.
+    const elapsed = startedAtRef.current > 0 ? Math.max(0, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000)) : 0;
     if (blob.size === 0 || blob.size > 4_500_000) return finishWithGuidedTranscript();
     try { const payload = { audioBase64: arrayBufferToBase64(await blob.arrayBuffer()), audioMime: blob.type || "audio/webm", expectedText: selectedStory.text, durationSeconds: elapsed, fallbackTranscript: liveTranscriptRef.current.trim() }; if (childProfile?.id) processAndSave.mutate({ ...payload, childProfileId: childProfile.id, materialId: selectedStory.materialId, storyTitle: selectedStory.title, assessmentMode, wordStates }); else processRecording.mutate(payload); } catch { finishWithGuidedTranscript(); }
   }

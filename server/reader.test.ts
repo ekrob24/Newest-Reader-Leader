@@ -74,3 +74,35 @@ describe("Reader Leader prototype analysis", () => {
     expect(result.events.some(event => event.eventType === "substitution")).toBe(true);
   });
 });
+
+describe("reading duration is recorded, not rewritten", () => {
+  const passage = "The lantern glowed softly in the quiet garden tonight.";
+
+  it("stores the duration that was read, not a comfortable minimum", () => {
+    // Regression pin. This used to return 20 for any read under twenty seconds, so a
+    // three-second reading reached the teacher's running record as a twenty-second one.
+    expect(analyseReadingText(passage, passage, 3).durationSeconds).toBe(3);
+    expect(analyseReadingText(passage, passage, 1).durationSeconds).toBe(1);
+    expect(analyseReadingText(passage, passage, 19).durationSeconds).toBe(19);
+    expect(analyseReadingText(passage, passage, 600).durationSeconds).toBe(600);
+  });
+
+  it("marks a short read as an unreliable pace sample instead of distorting it", () => {
+    expect(analyseReadingText(passage, passage, 3).paceReliable).toBe(false);
+    expect(analyseReadingText(passage, passage, 60).paceReliable).toBe(true);
+  });
+
+  it("survives a duration of zero without inventing one", () => {
+    // Previously `durationSeconds || 60` turned a zero into a minute. Zero is now recorded
+    // as zero; only the division is guarded, so the pace stays finite.
+    const analysis = analyseReadingText(passage, passage, 0);
+    expect(analysis.durationSeconds).toBe(0);
+    expect(analysis.paceReliable).toBe(false);
+    expect(Number.isFinite(analysis.pace)).toBe(true);
+  });
+
+  it("still computes an ordinary pace over an ordinary read", () => {
+    const analysis = analyseReadingText(passage, passage, 60);
+    expect(analysis.pace).toBe(9);
+  });
+});

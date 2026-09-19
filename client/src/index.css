@@ -755,4 +755,4 @@ select:focus,
 @media (max-width: 640px) { .synthetic-data-notice { padding: 9px 14px; font-size: 11px; } }
 
 /* The child keeps reading to a microphone that stopped listening unless something says so. */
-.kids-mic-warning { margin: 14px auto 0; max-width: 620px; padding: 11px 16px; border-radius: 14px; background: #fff1e2; color: #7a4406; font-size: 14px; font-weight: 700; text-align: center; }
+.kids-mic-warning { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin: 14px auto 0; max-width: 680px; padding: 12px 18px; border-radius: 14px; background: #fff1e2; color: #7a4406; font-size: 14px; font-weight: 700; text-align: center; }.kids-mic-warning button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 0; border-radius: 999px; background: #7a4406; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; }.kids-mic-warning small { flex-basis: 100%; font-weight: 600; opacity: .75; }

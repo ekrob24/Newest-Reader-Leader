@@ -261,12 +261,13 @@ export default function Home() {
   function moveOnFromTrickyWord(wordId?: string) {
     if (assessmentMode === "MONTHLY_ASSESSMENT") return;
     const target = (wordId ? wordStates.find(state => state.id === wordId) : undefined) ?? wordStates.find(state => state.status === "current") ?? wordStates.find(state => state.status === "incorrect");
-    if (!target || target.attempts < 3) return;
+    if (!target) return;
     const targetIndex = Number.parseInt(target.id.replace("word-", ""), 10);
     if (!Number.isFinite(targetIndex)) return toast("Keep reading from the next word when you are ready.");
-    setMovedOnAttempts(previous => new Map(previous).set(target.id, Math.max(target.attempts, 3)));
+    // The attempts the child actually made, not a floor of three.
+    setMovedOnAttempts(previous => new Map(previous).set(target.id, Math.max(target.attempts, 1)));
     setWordStates(previous => previous.map((state, index) => {
-      if (state.id === target.id) return { ...state, status: "incorrect", attempts: Math.max(state.attempts, 3) };
+      if (state.id === target.id) return { ...state, status: "incorrect", attempts: Math.max(state.attempts, 1), movedOn: true };
       if (index === targetIndex + 1 && state.status === "unread") return { ...state, status: "current" };
       return state;
     }));
@@ -407,8 +408,13 @@ function ReadingView({ story, storyWords, processedWords, state, recognitionStat
   }, [activePage, assessmentMode, pageIndex, pages.length, wordStates]);
   const currentWord = wordStates.find(word => word.status === "current") ?? wordStates.find(word => word.status === "incorrect");
   const needsGentleRetry = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect";
-  const showMoveOn = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect" && currentWord.attempts >= 3;
-  const showWordHint = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect" && currentWord.attempts >= 2 && currentWord.attempts < 3;
+  // Offered as soon as a word is flagged, not after three tries. The speech recogniser
+  // mishears a word on the first attempt, and until this appeared there was nothing on the
+  // screen that let the child continue: the page will not advance past a flagged word, so a
+  // misheard reader was simply stuck. The child most likely to be misheard is the one this
+  // product exists for, which makes waiting for a third attempt the wrong default.
+  const showMoveOn = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect";
+  const showWordHint = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect";
   const progress = Math.min(100, Math.round((processedWords / Math.max(storyWords.length, 1)) * 100));
   const hearModel = (text: string, wordId?: string) => {
     if (state === "listening") onPauseResume();

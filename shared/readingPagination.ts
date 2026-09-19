@@ -38,6 +38,11 @@ export function isReadingPageComplete(page: ReadingPage | undefined, states: Liv
   return states.slice(page.startWordIndex, page.endWordIndex + 1).every(state => {
     if (state.status === "correct" || state.status === "retried_correct") return true;
     if (state.status !== "incorrect") return false;
-    return mode === "MONTHLY_ASSESSMENT" || state.attempts >= 3;
+    if (mode === "MONTHLY_ASSESSMENT") return true;
+    // A word the child chose to leave, or one they have genuinely tried three times.
+    // Deciding this on attempts alone is what trapped a misheard reader: the speech
+    // recogniser flags a word after one attempt, and until this returned true there was
+    // no way forward on the page at all.
+    return state.movedOn === true || state.attempts >= 3;
   });
 }

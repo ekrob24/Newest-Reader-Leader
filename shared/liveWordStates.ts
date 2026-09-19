@@ -1,5 +1,12 @@
 export type LiveAssessmentMode = "GUIDED_PRACTICE" | "ASSISTED_PRACTICE" | "MONTHLY_ASSESSMENT";
-export type LiveWordState = { id: string; text: string; status: "unread" | "current" | "correct" | "incorrect" | "retried_correct"; attempts: number };
+export type LiveWordState = {
+  id: string; text: string;
+  status: "unread" | "current" | "correct" | "incorrect" | "retried_correct";
+  attempts: number;
+  /** The child chose to leave this word and keep reading. Recorded as its own fact, so the
+   *  page can move on without anyone inventing a number of attempts that did not happen. */
+  movedOn?: boolean;
+};
 import { matchExpectedReadingWord, type EducatorApprovedIrishVariant, type ReadingLanguageSupport } from "./dialectSupport";
 
 const wordPattern = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
@@ -19,13 +26,22 @@ export function deriveLiveWordStates(expectedText: string, transcript: string, m
   while (heardIndex < heardWords.length) {
     while (expectedIndex < states.length && movedOnAttempts.has(states[expectedIndex].id)) {
       states[expectedIndex].status = "incorrect";
-      const priorAttempts = movedOnAttempts.get(states[expectedIndex].id) ?? 3;
-      states[expectedIndex].attempts = Math.max(3, priorAttempts);
+      const priorAttempts = movedOnAttempts.get(states[expectedIndex].id) ?? 1;
+      // The real number of tries, not a floor of three. This used to record three attempts
+      // for a word a child tried once, purely so the page-completion rule would let them
+      // past — a fabricated count in the running record, to work around a stuck screen.
+      states[expectedIndex].attempts = priorAttempts;
+      states[expectedIndex].movedOn = true;
       heardIndex += priorAttempts;
       expectedIndex += 1;
     }
     const state = states[expectedIndex];
     if (!state) break;
+    // Skipping past moved-on words above can carry heardIndex beyond what was actually
+    // heard. Reading past the end handed undefined to the matcher, which threw inside the
+    // effect that derives these states — React unmounted the reading view and the screen
+    // stopped responding. That is what "it freezes when it flags a word" was.
+    if (heardIndex >= heardWords.length) break;
     const heardWord = heardWords[heardIndex];
     const matches = matchExpectedReadingWord(state.text, heardWord, languageSupport, educatorApprovedVariants).matches;
     const nextState = states[expectedIndex + 1];
@@ -52,7 +68,8 @@ export function deriveLiveWordStates(expectedText: string, transcript: string, m
   for (let index = 0; index < states.length; index += 1) {
     if (!movedOnAttempts.has(states[index].id)) continue;
     states[index].status = "incorrect";
-    states[index].attempts = Math.max(3, movedOnAttempts.get(states[index].id) ?? 3);
+    states[index].attempts = movedOnAttempts.get(states[index].id) ?? 1;
+    states[index].movedOn = true;
   }
   while (expectedIndex < states.length && movedOnAttempts.has(states[expectedIndex].id)) expectedIndex += 1;
   if (expectedIndex < states.length && states[expectedIndex].status === "unread") states[expectedIndex].status = "current";

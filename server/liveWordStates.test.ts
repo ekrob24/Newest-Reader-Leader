@@ -46,3 +46,54 @@ describe("live transcript word tracking", () => {
     expect(standard[1]).toMatchObject({ text: "thin", status: "incorrect", attempts: 2 });
   });
 });
+
+describe("moving on from a word the coach misheard", () => {
+  const passage = "the cat sat on the mat";
+
+  it("records the attempts the child actually made, not a floor of three", () => {
+    // The old behaviour wrote three attempts for a word tried once, so that the page-
+    // completion rule would let the child past. That is a fabricated count in a child's
+    // running record, invented to work around a stuck screen.
+    const movedOn = new Map([["word-2", 1]]);
+    const states = deriveLiveWordStates(passage, "the cat mat", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn);
+    const sat = states.find(state => state.id === "word-2")!;
+    expect(sat.attempts).toBe(1);
+    expect(sat.movedOn).toBe(true);
+    expect(sat.status).toBe("incorrect");
+  });
+
+  it("marks the word as left rather than as read", () => {
+    const movedOn = new Map([["word-2", 2]]);
+    const states = deriveLiveWordStates(passage, "the cat sit", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn);
+    const sat = states.find(state => state.id === "word-2")!;
+    expect(sat.movedOn).toBe(true);
+    expect(sat.attempts).toBe(2);
+    // Every other word is untouched by the decision.
+    expect(states.filter(state => state.movedOn).map(state => state.id)).toEqual(["word-2"]);
+  });
+});
+
+describe("moving on never crashes the reading view", () => {
+  const passage = "the cat sat on the mat";
+
+  it("survives a moved-on word at the very end of what was heard", () => {
+    // Regression. deriveLiveWordStates runs inside a React effect, so a throw here does not
+    // surface as a bad word state — it unmounts the reader and the child cannot do anything
+    // at all. Reached by tapping "Need help - move on" on the last word heard so far, which
+    // is exactly when a child would.
+    for (const attempts of [1, 2, 3, 5]) {
+      const movedOn = new Map([["word-2", attempts]]);
+      expect(() => deriveLiveWordStates(passage, "the cat sat", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn)).not.toThrow();
+    }
+  });
+
+  it("survives moving on from several words at once", () => {
+    const movedOn = new Map([["word-1", 2], ["word-2", 3], ["word-3", 1]]);
+    expect(() => deriveLiveWordStates(passage, "the cat", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn)).not.toThrow();
+  });
+
+  it("survives moving on before anything has been heard", () => {
+    const movedOn = new Map([["word-0", 1]]);
+    expect(() => deriveLiveWordStates(passage, "", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn)).not.toThrow();
+  });
+});

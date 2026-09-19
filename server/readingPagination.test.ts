@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createReadingPages, isReadingPageComplete } from "../shared/readingPagination";
+import { initialLiveWordStates } from "../shared/liveWordStates";
 import type { LiveWordState } from "../shared/liveWordStates";
 
 const states = (count: number): LiveWordState[] => Array.from({ length: count }, (_, index) => ({
@@ -31,5 +32,42 @@ describe("reading pagination", () => {
     const movedOn: LiveWordState[] = [{ id: "word-0", text: "tricky", status: "incorrect", attempts: 3 }];
     expect(isReadingPageComplete(page, firstMiss, "GUIDED_PRACTICE")).toBe(false);
     expect(isReadingPageComplete(page, movedOn, "GUIDED_PRACTICE")).toBe(true);
+  });
+});
+
+describe("a misheard reader can always move forward", () => {
+  const passage = "the cat sat on the mat";
+  const page = { index: 0, startWordIndex: 0, endWordIndex: 5, tokens: [], text: passage };
+
+  const pageStates = (overrides: Partial<LiveWordState> & { id: string }) =>
+    initialLiveWordStates(passage).map(state =>
+      state.id === overrides.id
+        ? { ...state, status: "correct" as const, ...overrides }
+        : { ...state, status: "correct" as const });
+
+  it("holds the page while a flagged word has had one attempt and no decision", () => {
+    // The product asking the child to try again. Correct on its own — it is the absence of
+    // any way out of it that was the bug.
+    const misheard = pageStates({ id: "word-2", status: "incorrect", attempts: 1 });
+    expect(isReadingPageComplete(page as never, misheard, "ASSISTED_PRACTICE")).toBe(false);
+  });
+
+  it("lets the page move on the moment the child chooses to leave the word", () => {
+    // Previously this needed attempts >= 3. A speech recogniser mishears on the first
+    // attempt, so between one and three there was no control on screen and no page advance:
+    // the reader was simply stuck, and the reader most likely to be misheard is the one this
+    // product exists for.
+    const movedOn = pageStates({ id: "word-2", status: "incorrect", attempts: 1, movedOn: true });
+    expect(isReadingPageComplete(page as never, movedOn, "ASSISTED_PRACTICE")).toBe(true);
+  });
+
+  it("still moves on after three genuine attempts without a decision", () => {
+    const tried = pageStates({ id: "word-2", status: "incorrect", attempts: 3 });
+    expect(isReadingPageComplete(page as never, tried, "ASSISTED_PRACTICE")).toBe(true);
+  });
+
+  it("never holds a monthly assessment, which does not ask for retries", () => {
+    const misheard = pageStates({ id: "word-2", status: "incorrect", attempts: 1 });
+    expect(isReadingPageComplete(page as never, misheard, "MONTHLY_ASSESSMENT")).toBe(true);
   });
 });

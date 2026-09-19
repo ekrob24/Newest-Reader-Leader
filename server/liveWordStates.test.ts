@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveLiveWordStates, firstGuidedModelWord } from "../shared/liveWordStates";
+import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead } from "../shared/liveWordStates";
 
 describe("live transcript word tracking", () => {
   it("keeps an assisted mismatch on the active word until the child self-corrects it", () => {
@@ -95,5 +95,39 @@ describe("moving on never crashes the reading view", () => {
   it("survives moving on before anything has been heard", () => {
     const movedOn = new Map([["word-0", 1]]);
     expect(() => deriveLiveWordStates(passage, "", "ASSISTED_PRACTICE", "STANDARD_ENGLISH", [], movedOn)).not.toThrow();
+  });
+});
+
+describe("a word the child has read does not get taken away", () => {
+  const passage = "the light made golden circles";
+  const read = (statuses: Array<"unread" | "current" | "correct" | "incorrect" | "retried_correct">) =>
+    initialLiveWordStates(passage).map((state, index) => ({ ...state, status: statuses[index] ?? "unread", attempts: statuses[index] === "unread" ? 0 : 1 }));
+
+  it("holds a correct word when a later transcript revision disagrees", () => {
+    // Reported exactly: "made" turned green, then red, then green, in a loop. The recogniser
+    // revises what it thinks it heard, and every revision re-derives every word.
+    const before = read(["correct", "correct", "correct", "unread", "unread"]);
+    const after = read(["correct", "correct", "incorrect", "unread", "unread"]);
+    const merged = keepWordsAlreadyRead(before, after);
+    expect(merged[2]!.status).toBe("correct");
+  });
+
+  it("holds a self-corrected word too", () => {
+    const before = read(["correct", "retried_correct", "unread", "unread", "unread"]);
+    const after = read(["correct", "incorrect", "unread", "unread", "unread"]);
+    expect(keepWordsAlreadyRead(before, after)[1]!.status).toBe("retried_correct");
+  });
+
+  it("lets every other word move freely, so the reading is never frozen", () => {
+    const before = read(["correct", "unread", "unread", "unread", "unread"]);
+    const after = read(["correct", "incorrect", "current", "unread", "unread"]);
+    const merged = keepWordsAlreadyRead(before, after);
+    expect(merged.map(state => state.status)).toEqual(["correct", "incorrect", "current", "unread", "unread"]);
+  });
+
+  it("carries the higher attempt count forward rather than losing tries", () => {
+    const before = read(["correct", "unread", "unread", "unread", "unread"]);
+    const after = initialLiveWordStates(passage).map((state, index) => index === 0 ? { ...state, status: "incorrect" as const, attempts: 4 } : state);
+    expect(keepWordsAlreadyRead(before, after)[0]).toMatchObject({ status: "correct", attempts: 4 });
   });
 });

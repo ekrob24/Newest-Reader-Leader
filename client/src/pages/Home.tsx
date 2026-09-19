@@ -8,7 +8,7 @@ import { TeacherDashboard } from "@/components/TeacherDashboard";
 import { ParentDashboard } from "@/components/ParentDashboard";
 import { trpc } from "@/lib/trpc";
 import type { MaterialRightsSource } from "../../../drizzle/schema";
-import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, type LiveWordState } from "@shared/liveWordStates";
+import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead, type LiveWordState } from "@shared/liveWordStates";
 import { hasChildReadingEvidence } from "@shared/readingEvidence";
 import { installOnDeviceSpeech, onDeviceAvailability, sendsVoiceOffDevice, speechModeNotice, type SpeechMode } from "@shared/onDeviceSpeech";
 import { SAVE_PENDING, childSaveMessage, isSaved, type SaveOutcome } from "@shared/saveOutcome";
@@ -97,6 +97,8 @@ export default function Home() {
    *  restart. Derived from a sustained state rather than an instantaneous one, so it cannot
    *  flash at the moment the child presses the button. */
   const [micTrouble, setMicTrouble] = useState(false);
+  /** What the recogniser is currently guessing, before it settles. Shown, never scored. */
+  const [interimTranscript, setInterimTranscript] = useState("");
   /** Where this browser processes the child's voice. Shown, never assumed. */
   const [speechMode, setSpeechMode] = useState<SpeechMode>("cloud");
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -182,7 +184,9 @@ export default function Home() {
     onSuccess: data => markSaved(data.session.id, data.session.audioStorageKey),
     onError: error => markNotSaved(error.message),
   });
-  const processedWords = useMemo(() => words(liveTranscript).length, [liveTranscript]);
+  // Counts what is settled plus what is still being guessed. The cursor keeps up with the
+  // child in real time while nothing unsettled reaches the word states or the record.
+  const processedWords = useMemo(() => words(`${liveTranscript} ${interimTranscript}`).length, [liveTranscript, interimTranscript]);
   const selectedStoryWords = useMemo(() => selectedStory.text.match(/\S+\s*/g) ?? [], [selectedStory]);
   const languageSupport = (childProgress.data?.learnerSettings?.languageSupport || "STANDARD_ENGLISH") as ReadingLanguageSupport;
   const educatorApprovedVariants = childProgress.data?.irishVariantContext?.variants || [];
@@ -195,7 +199,12 @@ export default function Home() {
     else if (accountRole === "child") setView("library");
   }, [accountRole, accountQuery.isLoading, isAuthenticated]);
 
-  useEffect(() => { if (liveTranscript.trim()) setWordStates(deriveLiveWordStates(selectedStory.text, liveTranscript, assessmentMode, languageSupport, educatorApprovedVariants, movedOnAttempts)); }, [assessmentMode, educatorApprovedVariants, languageSupport, liveTranscript, movedOnAttempts, selectedStory.text]);
+  useEffect(() => {
+    if (!liveTranscript.trim()) return;
+    const derived = deriveLiveWordStates(selectedStory.text, liveTranscript, assessmentMode, languageSupport, educatorApprovedVariants, movedOnAttempts);
+    // A word the child has already read stays read, whatever a later revision decides.
+    setWordStates(previous => keepWordsAlreadyRead(previous, derived));
+  }, [assessmentMode, educatorApprovedVariants, languageSupport, liveTranscript, movedOnAttempts, selectedStory.text]);
 
   useEffect(() => {
     const update = () => setConnectionStatus(getBrowserConnectionQuality());
@@ -307,7 +316,7 @@ export default function Home() {
   });
 
   function resetWordStates(story: Story) { guidedModelledWordsRef.current.clear(); setMovedOnAttempts(new Map()); setWordStates(initialLiveWordStates(story.text)); }
-  function clearLiveTranscript() { liveTranscriptRef.current = ""; pendingTranscriptRef.current = ""; setLiveTranscript(""); }
+  function clearLiveTranscript() { liveTranscriptRef.current = ""; pendingTranscriptRef.current = ""; setLiveTranscript(""); setInterimTranscript(""); }
   function launchStory(story: Story) { setSelectedStory(story); clearLiveTranscript(); setReport(null); setSavedSessionId(null); setHasSavedRecording(false); setModelSpeaking(false); setCoachMoment("idle"); setHesitationHint(false); setAssessmentMode(childProgress.data?.learnerSettings?.defaultReadingMode || "ASSISTED_PRACTICE"); resetWordStates(story); setReadingState("ready"); setRecognitionStatus("ready"); setView("reading"); }
   function chooseStory(story: Story) { setWarmUpStory(story); }
   function selectAssessmentMode(mode: AssessmentMode) { setAssessmentMode(mode); clearLiveTranscript(); setCoachMoment("idle"); resetWordStates(selectedStory); }
@@ -410,9 +419,28 @@ export default function Home() {
     recognition.onresult = (event: any) => {
       // A result from a recogniser we have already replaced would rewind the transcript.
       if (recognitionRef.current !== recognition) return;
-      let segmentText = "";
-      for (let index = 0; index < event.results.length; index += 1) segmentText += `${event.results[index][0].transcript} `;
-      const combinedTranscript = appendRecognitionTranscript(recognitionBase, segmentText);
+      // Finalised results only. Interim results are the recogniser thinking aloud: it revises
+      // them continuously, and every revision re-derived every word, so a word turned green,
+      // then red, then green, in a loop. They are also not a record of what a child said, so
+      // they have no business in a transcript that gets scored and saved. Kept separately,
+      // they still drive the live sense of being heard.
+      let finalText = "";
+      let interimText = "";
+      for (let index = 0; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) finalText += `${result[0].transcript} `;
+        else interimText += `${result[0].transcript} `;
+      }
+      setInterimTranscript(interimText.trim());
+      if (!finalText.trim()) {
+        // Still mid-phrase: the child is being heard, but nothing is settled to score yet.
+        recognitionFailuresRef.current = 0;
+        lastRecognitionAtRef.current = Date.now();
+        setHesitationHint(false);
+        setRecognitionStatus("listening");
+        return;
+      }
+      const combinedTranscript = appendRecognitionTranscript(recognitionBase, finalText);
       liveTranscriptRef.current = combinedTranscript;
       pendingTranscriptRef.current = combinedTranscript;
       if (transcriptFrameRef.current === null) transcriptFrameRef.current = window.requestAnimationFrame(() => { transcriptFrameRef.current = null; setLiveTranscript(pendingTranscriptRef.current); });

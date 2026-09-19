@@ -79,3 +79,25 @@ export function deriveLiveWordStates(expectedText: string, transcript: string, m
 export function firstGuidedModelWord(states: LiveWordState[], modelledWordIds: ReadonlySet<string>) {
   return states.find(state => state.status === "incorrect" && state.attempts >= 2 && !modelledWordIds.has(state.id));
 }
+
+/**
+ * Keep a word that has already been read correctly.
+ *
+ * Word states are recomputed from the whole transcript every time it changes, so a later
+ * revision of the transcript can take a word away again. A child watched a word turn green,
+ * then red, then green, in a loop. Pedagogically that is also simply wrong: they read it,
+ * and a recogniser changing its mind afterwards is not the child unreading it.
+ *
+ * Only ever holds a word at "read correctly". A word that has not been read yet, or that the
+ * child is working on, follows the new state, so this cannot freeze the reading in place.
+ */
+export function keepWordsAlreadyRead(previous: LiveWordState[], next: LiveWordState[]): LiveWordState[] {
+  const held = new Map(previous.filter(state => state.status === "correct" || state.status === "retried_correct").map(state => [state.id, state]));
+  return next.map(state => {
+    const earlier = held.get(state.id);
+    if (!earlier) return state;
+    if (state.status === "correct" || state.status === "retried_correct") return state;
+    // Carry the attempts forward if the newer reading saw more of them.
+    return { ...earlier, attempts: Math.max(earlier.attempts, state.attempts) };
+  });
+}

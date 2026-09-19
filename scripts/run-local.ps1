@@ -50,7 +50,7 @@ if (-not $mysqlUp) {
   Write-Host ""
   Write-Host "Without Docker, install MySQL Server 8 and start it, then re-run this with the"
   Write-Host "root password you chose:"
-  Write-Host '  powershell -ExecutionPolicy Bypass -File .\scriptsun-local.ps1 -MysqlPassword "yourpassword"'
+  Write-Host '  powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1 -MysqlPassword "yourpassword"'
   Write-Host ""
   Write-Host "Wait about thirty seconds after starting MySQL before trying again."
   exit 1

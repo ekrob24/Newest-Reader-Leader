@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import type { MaterialRightsSource } from "../../../drizzle/schema";
 import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, type LiveWordState } from "@shared/liveWordStates";
 import { hasChildReadingEvidence } from "@shared/readingEvidence";
+import { installOnDeviceSpeech, onDeviceAvailability, sendsVoiceOffDevice, speechModeNotice, type SpeechMode } from "@shared/onDeviceSpeech";
 import { SAVE_PENDING, childSaveMessage, isSaved, type SaveOutcome } from "@shared/saveOutcome";
 import { isPaceMeaningful, shortSampleNote } from "@shared/readingPace";
 import type { AudioRetentionStatus } from "@shared/types";
@@ -32,6 +33,8 @@ type Story = { id: string; materialId?: number; title: string; level: string; fo
 /** Restart the recogniser after this much silence while the child is meant to be reading.
  *  The browser's speech service stops on its own and does not always fire onend. */
 const RECOGNITION_RESTART_AFTER_MS = 9_000;
+/** How long the recogniser must be stranded before the reader is told anything at all. */
+const MIC_TROUBLE_AFTER_MS = 4_000;
 
 type Report = { transcript: string; mode: AssessmentMode; accuracy: number; firstPassAccuracy: number; pace: number; correctWords: number; totalWords: number; durationSeconds: number; practiceWords: string[]; retrySummary: { word: string; retries: number }[]; selfCorrections: string[]; modelWords: string[]; childMessage: string; nextStep: string; transcriptionStatus: "transcribed" | "guided"; hasRecording?: boolean; paceReliable?: boolean; audioStatus?: AudioRetentionStatus };
 
@@ -90,6 +93,12 @@ export default function Home() {
   const [hesitationHint, setHesitationHint] = useState(false);
   /** The browser's own word for why recognition stopped. Shown rather than guessed at. */
   const [recognitionError, setRecognitionError] = useState<string | null>(null);
+  /** Only after the recogniser has been stranded long enough that this is not an ordinary
+   *  restart. Derived from a sustained state rather than an instantaneous one, so it cannot
+   *  flash at the moment the child presses the button. */
+  const [micTrouble, setMicTrouble] = useState(false);
+  /** Where this browser processes the child's voice. Shown, never assumed. */
+  const [speechMode, setSpeechMode] = useState<SpeechMode>("cloud");
   const [liveTranscript, setLiveTranscript] = useState("");
   const [report, setReport] = useState<Report | null>(null);
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
@@ -119,6 +128,8 @@ export default function Home() {
   const lastRecognitionAtRef = useRef(0);
   const restartTimerRef = useRef<number | null>(null);
   const recognitionFailuresRef = useRef(0);
+  const notListeningSinceRef = useRef<number | null>(null);
+  const speechModeRef = useRef<SpeechMode>("cloud");
   const guidedModelledWordsRef = useRef(new Set<string>());
 
   const accountQuery = trpc.readerLeader.account.me.useQuery(undefined, { enabled: isAuthenticated });
@@ -217,21 +228,49 @@ export default function Home() {
     if (recognitionStatus !== "listening") setHesitationHint(false);
     const timer = window.setInterval(() => {
       if (recognitionStatus === "listening" && lastRecognitionAtRef.current && Date.now() - lastRecognitionAtRef.current > 5_500) setHesitationHint(true);
-      // The browser's speech service stops on its own — after a silence, a network hiccup, or
-      // for no stated reason — and onend does not always fire, so the restart there is not
-      // enough. Without this the child keeps reading to a microphone that is no longer
-      // listening, and nothing on screen says so. Reported as "I had to re-enable the mic".
-      const silentFor = lastRecognitionAtRef.current ? Date.now() - lastRecognitionAtRef.current : 0;
-      if (recognitionDesiredRef.current && readingState === "listening" && silentFor > RECOGNITION_RESTART_AFTER_MS) {
-        lastRecognitionAtRef.current = Date.now();
-        setRecognitionStatus("processing");
-        // Through the single restart path. Calling beginRecognition directly from here is
-        // what let two recognisers exist at once.
+      // The browser's speech service stops on its own and onend does not always bring it
+      // back, so the child ends up reading to a microphone that is not listening with
+      // nothing on screen saying so.
+      //
+      // Watch the recogniser's own state, not how long the child has been quiet. A quiet
+      // child with a healthy recogniser is a child thinking about a word; restarting then
+      // aborts something that was working, and the abort is what produced the error the
+      // reader was shown. What needs recovering is a recogniser that has stopped saying it
+      // is listening and has not come back.
+      if (recognitionStatus === "listening") {
+        notListeningSinceRef.current = null;
+        if (micTrouble) setMicTrouble(false);
+        return;
+      }
+      if (notListeningSinceRef.current === null) { notListeningSinceRef.current = Date.now(); return; }
+      const strandedFor = Date.now() - notListeningSinceRef.current;
+      // Long enough that an ordinary restart, which takes a moment, never shows a warning.
+      if (strandedFor > MIC_TROUBLE_AFTER_MS && !micTrouble) setMicTrouble(true);
+      if (recognitionDesiredRef.current && strandedFor > RECOGNITION_RESTART_AFTER_MS) {
+        notListeningSinceRef.current = Date.now();
         scheduleRecognitionRestart();
       }
     }, 700);
     return () => window.clearInterval(timer);
-  }, [readingState, recognitionStatus]);
+  }, [readingState, recognitionStatus, micTrouble]);
+
+  // Decide once, at load, where speech will be processed — and fetch the local model if the
+  // browser has one available to download. Not silent either way: the reader is told.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let availability = await onDeviceAvailability(window, "en-IE");
+      if (availability === "downloadable" || availability === "downloading") {
+        const installed = await installOnDeviceSpeech(window, "en-IE");
+        availability = installed ? "available" : await onDeviceAvailability(window, "en-IE");
+      }
+      if (cancelled) return;
+      const mode: SpeechMode = availability === "available" ? "on-device" : "cloud";
+      speechModeRef.current = mode;
+      setSpeechMode(mode);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const finishWithReport = (candidate: Report, persist = true) => {
     setReport(candidate);
@@ -356,6 +395,10 @@ export default function Home() {
     const recognitionBase = liveTranscriptRef.current;
     const recognition = new Recognition();
     recognition.lang = "en-IE"; recognition.continuous = true; recognition.interimResults = true; recognition.maxAlternatives = 1;
+    // Local when the browser can. This keeps a child's voice on the device, and it removes
+    // the network round trip to the browser maker's speech service, which is what stops of
+    // its own accord and leaves the reader talking to nothing.
+    if (speechModeRef.current === "on-device") recognition.processLocally = true;
     recognitionRef.current = recognition;
 
     recognition.onstart = () => {
@@ -379,6 +422,10 @@ export default function Home() {
     };
     recognition.onerror = (event: any) => {
       if (recognitionRef.current !== recognition) return;
+      // "aborted" is what the browser reports when this app stops recognition itself, which
+      // every restart does, and "no-speech" is a child thinking. Neither is a fault, and
+      // showing them told the reader something was wrong when nothing was.
+      if (event.error === "aborted" || event.error === "no-speech") return;
       setRecognitionError(typeof event?.error === "string" ? event.error : "unknown");
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         // A permission refusal is not something to retry at the child.
@@ -386,7 +433,7 @@ export default function Home() {
         setRecognitionStatus("unavailable");
         return;
       }
-      if (event.error !== "no-speech" && event.error !== "aborted") recognitionFailuresRef.current += 1;
+      recognitionFailuresRef.current += 1;
     };
     recognition.onend = () => {
       if (recognitionRef.current !== recognition) return;
@@ -395,6 +442,11 @@ export default function Home() {
 
     try {
       recognition.start();
+      // Synchronously, not only in onstart: onstart can lag by hundreds of milliseconds, and
+      // in that gap the reader was told the microphone had stopped the instant they started.
+      lastRecognitionAtRef.current = Date.now();
+      setRecognitionError(null);
+      setRecognitionStatus("listening");
     } catch {
       // Usually the previous instance has not finished ending. Back off and try again rather
       // than leaving a recogniser that was never started as the current one.
@@ -455,7 +507,7 @@ export default function Home() {
   const assignedStories: Story[] = (assignedMaterials.data ?? []).map((material, index) => ({ id: `material-${material.id}`, materialId: material.id, title: material.title, level: material.readingLevel, focus: material.exerciseSet?.activity || "Teacher-selected reading practice", duration: "Teacher assignment", description: "A new reading passage assigned by your teacher.", text: material.sourceText, art: index % 2 ? "plant" : "kite", color: index % 2 ? "#d9f0e5" : "#fff1bd", accent: index % 2 ? "#48a16d" : "#f4c746" }));
   const kidsMode = accountRole === "child" && (view === "reading" || view === "report" || view === "quiz");
   const surfaceClass = accountRole === "child" ? "student-app" : parentContext ? "parent-app" : isTeacherAccount ? "teacher-app" : "";
-  return <div className={`rl-app ${surfaceClass} view-${view} ${kidsMode ? "kids-mode-app" : ""}`}><header className="top-bar"><button className="brand pressable" onClick={() => setView(isTeacherAccount && !parentContext ? "teacher" : isParentAccount ? "parent" : "library")} aria-label="Reader Leader home"><span className="brand-mark"><span /></span> Reader Leader</button><div className="account-pill"><span><strong>{parentContext ? "Family Reading Space" : accountRole === "admin" ? "Reader Leader Admin" : user?.name || displayName}</strong><small>{accountLabel}</small></span><button className="pressable" onClick={() => void logout()} aria-label="Sign out"><LogOut size={16} /></button></div></header><div className="layout"><aside className={`side-nav ${parentContext ? "family-nav" : isTeacherAccount ? "teacher-nav" : "child-nav"}`}><div className="nav-intro">{parentContext ? "FAMILY · READING TOGETHER" : accountRole === "admin" ? "ADMINISTRATOR · ALL RECORDS" : `${displayName.toUpperCase()} · ${childProfile?.bookBand || "READ, GROW, LEAD"}`}<br />Reader Leader</div><nav className="nav-links">{accountRole === "admin" && !parentContext && navItem("library", "Reading Library", BookOpen)}{!isTeacherAccount && !isParentAccount && navItem("library", "Reading Library", BookOpen)}{!isTeacherAccount && !isParentAccount && navItem("reading", "Read with Reader Leader", Mic)}{isTeacherAccount && !parentContext && navItem("teacher", "Teacher Dashboard", UsersRound)}{isParentAccount && <><>{navItem("parent", "Parent Dashboard", HomeIcon)}</><button className="nav-link workspace-link pressable" onClick={() => switchWorkspace("child")}><BookOpen size={17} strokeWidth={2.3} /> Reading Library<small>Child sign-in</small></button><button className="nav-link workspace-link pressable" onClick={() => switchWorkspace("teacher")}><UsersRound size={17} strokeWidth={2.3} /> Teacher Dashboard<small>Teacher sign-in</small></button></>}</nav><div className="side-note"><strong>Today’s mission</strong>{parentContext ? "Ask about one part of the story." : isTeacherAccount ? "Review one reading moment with curiosity." : "Read one small page with a brave voice."}</div></aside><main className="page"><i className="bauhaus shape-circle" /><i className="bauhaus shape-square" /><i className="bauhaus shape-triangle" />{view === "library" && <LibraryView name={childProfile?.displayName ?? "Amina"} profile={childProfile} progress={childProgress.data?.summary} quizHistory={childProgress.data?.quizHistory || []} latestSessionId={childProgress.data?.sessions?.[0]?.id} assignedStories={assignedStories} joinClass={code => joinClass.mutate({ classCode: code })} joining={joinClass.isPending} chooseStory={chooseStory} />}{view === "reading" && <ReadingView story={selectedStory} storyWords={selectedStoryWords} processedWords={processedWords} state={readingState} recognitionStatus={recognitionStatus} connectionStatus={connectionStatus} transcript={liveTranscript} isProcessing={processRecording.isPending || processAndSave.isPending} coachMoment={coachMoment} assessmentMode={assessmentMode} wordStates={wordStates} hesitationHint={hesitationHint} onModeChange={selectAssessmentMode} onWordAttempt={recordWordAttempt} onMoveOn={moveOnFromTrickyWord} onRestartMic={() => { recognitionFailuresRef.current = 0; setRecognitionError(null); beginRecognition(); }} recognitionError={recognitionError} onBack={() => { restartReading(); setView("library"); }} onStart={startReading} onPauseResume={pauseOrResume} onRestart={restartReading} onComplete={completeReading} onGuidedComplete={completeGuidedSession} onCoach={setCoachMoment} />}{view === "report" && report && <ReportView story={selectedStory} report={report} coachMoment={coachMoment} sessionId={savedSessionId} childProfileId={childProfile?.id} saveOutcome={saveOutcome} retrying={saveSession.isPending} onRetrySave={lastAttemptRef.current ? () => lastAttemptRef.current?.() : undefined} onQuiz={() => setView("quiz")} onReadAgain={() => chooseStory(selectedStory)} onLibrary={() => setView("library")} />}{view === "quiz" && childProfile?.id && selectedStory.materialId && <QuizView childProfileId={childProfile.id} materialId={selectedStory.materialId} onDone={() => setView("library")} />}{view === "teacher" && <TeacherDashboard data={teacherDashboard.data} loading={teacherDashboard.isLoading} />}{view === "parent" && <ParentDashboard data={parentDashboard.data} loading={parentDashboard.isLoading} onReadTogether={() => switchWorkspace("child")} />}</main></div>{warmUpStory && <VocabularySoundWarmUp story={warmUpStory} onClose={() => setWarmUpStory(null)} onBegin={() => { launchStory(warmUpStory); setWarmUpStory(null); }} />}</div>;
+  return <div className={`rl-app ${surfaceClass} view-${view} ${kidsMode ? "kids-mode-app" : ""}`}><header className="top-bar"><button className="brand pressable" onClick={() => setView(isTeacherAccount && !parentContext ? "teacher" : isParentAccount ? "parent" : "library")} aria-label="Reader Leader home"><span className="brand-mark"><span /></span> Reader Leader</button><div className="account-pill"><span><strong>{parentContext ? "Family Reading Space" : accountRole === "admin" ? "Reader Leader Admin" : user?.name || displayName}</strong><small>{accountLabel}</small></span><button className="pressable" onClick={() => void logout()} aria-label="Sign out"><LogOut size={16} /></button></div></header><div className="layout"><aside className={`side-nav ${parentContext ? "family-nav" : isTeacherAccount ? "teacher-nav" : "child-nav"}`}><div className="nav-intro">{parentContext ? "FAMILY · READING TOGETHER" : accountRole === "admin" ? "ADMINISTRATOR · ALL RECORDS" : `${displayName.toUpperCase()} · ${childProfile?.bookBand || "READ, GROW, LEAD"}`}<br />Reader Leader</div><nav className="nav-links">{accountRole === "admin" && !parentContext && navItem("library", "Reading Library", BookOpen)}{!isTeacherAccount && !isParentAccount && navItem("library", "Reading Library", BookOpen)}{!isTeacherAccount && !isParentAccount && navItem("reading", "Read with Reader Leader", Mic)}{isTeacherAccount && !parentContext && navItem("teacher", "Teacher Dashboard", UsersRound)}{isParentAccount && <><>{navItem("parent", "Parent Dashboard", HomeIcon)}</><button className="nav-link workspace-link pressable" onClick={() => switchWorkspace("child")}><BookOpen size={17} strokeWidth={2.3} /> Reading Library<small>Child sign-in</small></button><button className="nav-link workspace-link pressable" onClick={() => switchWorkspace("teacher")}><UsersRound size={17} strokeWidth={2.3} /> Teacher Dashboard<small>Teacher sign-in</small></button></>}</nav><div className="side-note"><strong>Today’s mission</strong>{parentContext ? "Ask about one part of the story." : isTeacherAccount ? "Review one reading moment with curiosity." : "Read one small page with a brave voice."}</div></aside><main className="page"><i className="bauhaus shape-circle" /><i className="bauhaus shape-square" /><i className="bauhaus shape-triangle" />{view === "library" && <LibraryView name={childProfile?.displayName ?? "Amina"} profile={childProfile} progress={childProgress.data?.summary} quizHistory={childProgress.data?.quizHistory || []} latestSessionId={childProgress.data?.sessions?.[0]?.id} assignedStories={assignedStories} joinClass={code => joinClass.mutate({ classCode: code })} joining={joinClass.isPending} chooseStory={chooseStory} />}{view === "reading" && <ReadingView story={selectedStory} storyWords={selectedStoryWords} processedWords={processedWords} state={readingState} recognitionStatus={recognitionStatus} connectionStatus={connectionStatus} transcript={liveTranscript} isProcessing={processRecording.isPending || processAndSave.isPending} coachMoment={coachMoment} assessmentMode={assessmentMode} wordStates={wordStates} hesitationHint={hesitationHint} micTrouble={micTrouble} speechMode={speechMode} onModeChange={selectAssessmentMode} onWordAttempt={recordWordAttempt} onMoveOn={moveOnFromTrickyWord} onRestartMic={() => { recognitionFailuresRef.current = 0; notListeningSinceRef.current = null; setRecognitionError(null); setMicTrouble(false); beginRecognition(); }} recognitionError={recognitionError} onBack={() => { restartReading(); setView("library"); }} onStart={startReading} onPauseResume={pauseOrResume} onRestart={restartReading} onComplete={completeReading} onGuidedComplete={completeGuidedSession} onCoach={setCoachMoment} />}{view === "report" && report && <ReportView story={selectedStory} report={report} coachMoment={coachMoment} sessionId={savedSessionId} childProfileId={childProfile?.id} saveOutcome={saveOutcome} retrying={saveSession.isPending} onRetrySave={lastAttemptRef.current ? () => lastAttemptRef.current?.() : undefined} onQuiz={() => setView("quiz")} onReadAgain={() => chooseStory(selectedStory)} onLibrary={() => setView("library")} />}{view === "quiz" && childProfile?.id && selectedStory.materialId && <QuizView childProfileId={childProfile.id} materialId={selectedStory.materialId} onDone={() => setView("library")} />}{view === "teacher" && <TeacherDashboard data={teacherDashboard.data} loading={teacherDashboard.isLoading} />}{view === "parent" && <ParentDashboard data={parentDashboard.data} loading={parentDashboard.isLoading} onReadTogether={() => switchWorkspace("child")} />}</main></div>{warmUpStory && <VocabularySoundWarmUp story={warmUpStory} onClose={() => setWarmUpStory(null)} onBegin={() => { launchStory(warmUpStory); setWarmUpStory(null); }} />}</div>;
 }
 
 function LoginLanding() {
@@ -487,7 +539,7 @@ function VocabularySoundWarmUp({ story, onClose, onBegin }: { story: Story; onCl
   return <div className="warmup-backdrop" role="presentation"><section className="warmup-modal" role="dialog" aria-modal="true" aria-labelledby="warmup-title"><button type="button" className="warmup-close" onClick={onClose} aria-label="Close vocabulary and sound warm-up"><X size={18} /></button><div className="kicker">Before you begin</div><h1 id="warmup-title">Vocabulary &amp; Sound Warm-Up</h1><p>Meet a few story words first. These are friendly clues, not a test—listen, notice, and have a go.</p><div className="warmup-word-grid">{focusWords.map((word, index) => <article key={word}><span>{index + 1}</span><b>{word}</b><button type="button" onClick={() => playSpeech(word)}><Volume2 size={15} /> Hear word</button></article>)}</div><div className="sound-warmup-tip"><Sparkles size={18} /><div><b>Sound focus</b><p>{soundTip}</p></div></div><div className="warmup-actions"><button type="button" className="secondary-cta" onClick={onClose}>Not now</button><button type="button" className="primary-cta" onClick={onBegin}><Mic size={17} /> Start guided reading</button></div></section></div>;
 }
 
-function ReadingView({ story, storyWords, processedWords, state, recognitionStatus, transcript, isProcessing, assessmentMode, wordStates, hesitationHint, recognitionError, onRestartMic, onMoveOn, onBack, onStart, onPauseResume, onComplete }: { story: Story; storyWords: string[]; processedWords: number; state: ReadingState; recognitionStatus: RecognitionStatus; connectionStatus: ConnectionStatus; transcript: string; isProcessing: boolean; coachMoment: CoachMoment; assessmentMode: AssessmentMode; wordStates: WordState[]; hesitationHint: boolean; recognitionError: string | null; onRestartMic: () => void; onModeChange: (mode: AssessmentMode) => void; onWordAttempt: (correct: boolean) => void; onMoveOn: () => void; onBack: () => void; onStart: () => void; onPauseResume: () => void; onRestart: () => void; onComplete: () => void; onGuidedComplete: () => void; onCoach: (moment: CoachMoment) => void }) {
+function ReadingView({ story, storyWords, processedWords, state, recognitionStatus, transcript, isProcessing, assessmentMode, wordStates, hesitationHint, micTrouble, speechMode, recognitionError, onRestartMic, onMoveOn, onBack, onStart, onPauseResume, onComplete }: { story: Story; storyWords: string[]; processedWords: number; state: ReadingState; recognitionStatus: RecognitionStatus; connectionStatus: ConnectionStatus; transcript: string; isProcessing: boolean; coachMoment: CoachMoment; assessmentMode: AssessmentMode; wordStates: WordState[]; hesitationHint: boolean; micTrouble: boolean; speechMode: SpeechMode; recognitionError: string | null; onRestartMic: () => void; onModeChange: (mode: AssessmentMode) => void; onWordAttempt: (correct: boolean) => void; onMoveOn: () => void; onBack: () => void; onStart: () => void; onPauseResume: () => void; onRestart: () => void; onComplete: () => void; onGuidedComplete: () => void; onCoach: (moment: CoachMoment) => void }) {
   const microphoneUnavailable = recognitionStatus === "unavailable";
   const isListening = state === "listening" && !microphoneUnavailable; const isPaused = state === "paused";
   const [isModelSpeaking, setIsModelSpeaking] = useState(false);
@@ -520,7 +572,7 @@ function ReadingView({ story, storyWords, processedWords, state, recognitionStat
     setSpeakingWordId(wordId ?? null);
     if (!playSpeech(text, undefined, () => { setIsModelSpeaking(false); setSpeakingWordId(null); })) { setIsModelSpeaking(false); setSpeakingWordId(null); }
   };
-  return <div className="kids-reading-shell"><header className="kids-reading-head"><button type="button" className="back-link" onClick={onBack}><ArrowLeft size={17} /> Back to Reading Library</button><div><h1 className="story-label">{story.title}</h1><p>Page {pageIndex + 1} of {pages.length}</p></div><div className="kids-progress" aria-label={`${progress}% through the story`}><i style={{ width: `${progress}%` }} /></div></header><section className="kids-reader-stage"><div className="reader-text kids-reader-text" aria-label={`Reading passage page ${pageIndex + 1}`}>{activePage.tokens.map((word, pageOffset) => { const index = activePage.startWordIndex + pageOffset; const wordState = wordStates[index]; const stateClass = assessmentMode === "MONTHLY_ASSESSMENT" ? (index === processedWords && isListening ? "current" : "") : wordState?.status ?? (index < processedWords ? "correct" : index === processedWords && isListening ? "current" : "unread"); const isHintWord = showWordHint && wordState?.id === currentWord?.id; const isPostReadingMiss = assessmentMode !== "MONTHLY_ASSESSMENT" && wordState?.status === "incorrect" && !isListening; const isTappableModelWord = isPostReadingMiss || isHintWord; const wordContent = <>{word}{wordState?.status === "retried_correct" && assessmentMode !== "MONTHLY_ASSESSMENT" ? <i className="retry-check" aria-label="Self-corrected"><Check size={11} /></i> : null}{isHintWord ? <span className="word-help-tooltip">Tap this word to hear it <Volume2 size={13} /></span> : null}</>; return isTappableModelWord && wordState ? <button type="button" className={`reader-word ${stateClass} missed-word ${speakingWordId === wordState.id ? "speaking" : ""}`} key={`${word}-${index}`} onClick={() => hearModel(word.replace(/[^a-zA-Z']/g, ""), wordState.id)} aria-label={`Hear how to say ${word.replace(/[^a-zA-Z']/g, "")}`}>{wordContent}</button> : <span className={`reader-word ${stateClass} ${isHintWord ? "needs-help" : ""}`} key={`${word}-${index}`}>{wordContent}</span>; })}</div>{hesitationHint && assessmentMode !== "MONTHLY_ASSESSMENT" && <div className="kids-gentle-pause">A small pause is okay. Take a breath and keep going.</div>}{isListening && recognitionStatus !== "listening" && <div className="kids-mic-warning" role="status" data-testid="mic-warning"><span>The microphone stopped hearing you. Reader Leader is trying to switch it back on.</span><button type="button" onClick={onRestartMic}><Mic size={15} /> Turn it back on</button>{recognitionError ? <small>The browser said: {recognitionError}</small> : null}</div>}</section><div className="kids-control-bar"><button type="button" className="hear-page-button" onClick={() => hearModel(activePage.tokens.join(""), "page")} aria-pressed={isModelSpeaking}><Volume2 size={19} /><span>{isModelSpeaking && speakingWordId === "page" ? "Reading aloud…" : "Hear page"}</span></button>{state === "ready" ? <button type="button" className="kids-mic-button" onClick={onStart}><Mic size={31} /><span>Tap to Read</span></button> : <button type="button" className={`kids-mic-button ${isListening ? "listening" : ""}`} onClick={onPauseResume}>{isListening ? <><Pause size={29} fill="currentColor" /><span>Pause</span></> : <><Play size={29} fill="currentColor" /><span>Keep reading</span></>}</button>}<button type="button" className="finish-button kids-finish-button" onClick={onComplete} disabled={isProcessing}>{isProcessing ? "Getting report…" : "Finish story"}</button></div>{showMoveOn && <div className="kids-move-on-card" role="status"><b>That word can wait for later.</b><span>We will save it for a short word activity after your story.</span><button type="button" onClick={onMoveOn}>Need help—move on <ChevronRight size={16} /></button></div>}<span className="sr-only" role="status" aria-live="polite">{recognitionStatus === "unavailable" ? "Guided reading is ready." : isListening ? "Listening." : state === "processing" ? "Preparing your reading report." : `Page ${pageIndex + 1} ready to read.`}</span></div>;
+  return <div className="kids-reading-shell"><header className="kids-reading-head"><button type="button" className="back-link" onClick={onBack}><ArrowLeft size={17} /> Back to Reading Library</button><div><h1 className="story-label">{story.title}</h1><p>Page {pageIndex + 1} of {pages.length}</p></div><div className="kids-progress" aria-label={`${progress}% through the story`}><i style={{ width: `${progress}%` }} /></div></header><section className="kids-reader-stage"><div className="reader-text kids-reader-text" aria-label={`Reading passage page ${pageIndex + 1}`}>{activePage.tokens.map((word, pageOffset) => { const index = activePage.startWordIndex + pageOffset; const wordState = wordStates[index]; const stateClass = assessmentMode === "MONTHLY_ASSESSMENT" ? (index === processedWords && isListening ? "current" : "") : wordState?.status ?? (index < processedWords ? "correct" : index === processedWords && isListening ? "current" : "unread"); const isHintWord = showWordHint && wordState?.id === currentWord?.id; const isPostReadingMiss = assessmentMode !== "MONTHLY_ASSESSMENT" && wordState?.status === "incorrect" && !isListening; const isTappableModelWord = isPostReadingMiss || isHintWord; const wordContent = <>{word}{wordState?.status === "retried_correct" && assessmentMode !== "MONTHLY_ASSESSMENT" ? <i className="retry-check" aria-label="Self-corrected"><Check size={11} /></i> : null}{isHintWord ? <span className="word-help-tooltip">Tap this word to hear it <Volume2 size={13} /></span> : null}</>; return isTappableModelWord && wordState ? <button type="button" className={`reader-word ${stateClass} missed-word ${speakingWordId === wordState.id ? "speaking" : ""}`} key={`${word}-${index}`} onClick={() => hearModel(word.replace(/[^a-zA-Z']/g, ""), wordState.id)} aria-label={`Hear how to say ${word.replace(/[^a-zA-Z']/g, "")}`}>{wordContent}</button> : <span className={`reader-word ${stateClass} ${isHintWord ? "needs-help" : ""}`} key={`${word}-${index}`}>{wordContent}</span>; })}</div><p className={`speech-mode-note ${sendsVoiceOffDevice(speechMode) ? "off-device" : ""}`} data-testid="speech-mode-note">{speechModeNotice(speechMode)}</p>{hesitationHint && assessmentMode !== "MONTHLY_ASSESSMENT" && <div className="kids-gentle-pause">A small pause is okay. Take a breath and keep going.</div>}{isListening && micTrouble && <div className="kids-mic-warning" role="status" data-testid="mic-warning"><span>The microphone stopped hearing you. Reader Leader is trying to switch it back on.</span><button type="button" onClick={onRestartMic}><Mic size={15} /> Turn it back on</button>{recognitionError ? <small>The browser said: {recognitionError}</small> : null}</div>}</section><div className="kids-control-bar"><button type="button" className="hear-page-button" onClick={() => hearModel(activePage.tokens.join(""), "page")} aria-pressed={isModelSpeaking}><Volume2 size={19} /><span>{isModelSpeaking && speakingWordId === "page" ? "Reading aloud…" : "Hear page"}</span></button>{state === "ready" ? <button type="button" className="kids-mic-button" onClick={onStart}><Mic size={31} /><span>Tap to Read</span></button> : <button type="button" className={`kids-mic-button ${isListening ? "listening" : ""}`} onClick={onPauseResume}>{isListening ? <><Pause size={29} fill="currentColor" /><span>Pause</span></> : <><Play size={29} fill="currentColor" /><span>Keep reading</span></>}</button>}{pageIndex < pages.length - 1 ? <button type="button" className="next-page-button" onClick={() => setPageIndex(index => Math.min(index + 1, pages.length - 1))}>Next page <ChevronRight size={17} /></button> : null}<button type="button" className="finish-button kids-finish-button" onClick={onComplete} disabled={isProcessing}>{isProcessing ? "Getting report…" : "Finish story"}</button></div>{showMoveOn && <div className="kids-move-on-card" role="status"><b>That word can wait for later.</b><span>We will save it for a short word activity after your story.</span><button type="button" onClick={onMoveOn}>Need help—move on <ChevronRight size={16} /></button></div>}<span className="sr-only" role="status" aria-live="polite">{recognitionStatus === "unavailable" ? "Guided reading is ready." : isListening ? "Listening." : state === "processing" ? "Preparing your reading report." : `Page ${pageIndex + 1} ready to read.`}</span></div>;
 }
 
 function ReportView({ story, report, sessionId, hasRecording = Boolean(report.hasRecording ?? (sessionId && report.transcriptionStatus === "transcribed")), childProfileId, saveOutcome, retrying, onRetrySave, onQuiz, onReadAgain, onLibrary }: { story: Story; report: Report; coachMoment: CoachMoment; sessionId: string | null; hasRecording?: boolean; childProfileId?: number; saveOutcome: SaveOutcome; retrying: boolean; onRetrySave?: () => void; onQuiz: () => void; onReadAgain: () => void; onLibrary: () => void }) {

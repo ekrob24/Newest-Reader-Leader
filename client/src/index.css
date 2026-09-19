@@ -756,3 +756,10 @@ select:focus,
 
 /* The child keeps reading to a microphone that stopped listening unless something says so. */
 .kids-mic-warning { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin: 14px auto 0; max-width: 680px; padding: 12px 18px; border-radius: 14px; background: #fff1e2; color: #7a4406; font-size: 14px; font-weight: 700; text-align: center; }.kids-mic-warning button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 0; border-radius: 999px; background: #7a4406; color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; }.kids-mic-warning small { flex-basis: 100%; font-weight: 600; opacity: .75; }
+
+/* Always available. The microphone must never be the only way forward. */
+.next-page-button { display: inline-flex; align-items: center; gap: 7px; padding: 14px 22px; border: 2px solid #cfe0d8; border-radius: 999px; background: #fff; color: #17604a; font-weight: 800; font-size: 15px; cursor: pointer; }
+.next-page-button:hover { background: #f1f8f5; }
+
+.speech-mode-note { margin: 12px auto 0; max-width: 620px; font-size: 12px; font-weight: 700; color: #4d7a66; text-align: center; }
+.speech-mode-note.off-device { color: #8a5a12; }

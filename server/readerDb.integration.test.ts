@@ -115,7 +115,9 @@ describe.skipIf(!databaseAvailable)("Reader Leader persisted class and reminder 
     createdClassIds.push(readerClass.id);
     const learner = await addLearnerToTeacherClass({ teacherUserId: teacher.id, classId: readerClass.id, displayName: "Goal Learner", bookBand: "Level 4 · Gold", familyCode: `F${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}` });
     createdUserIds.push(learner.profile.userId);
-    const weekStart = currentWeekStart(new Date("2026-09-07T12:00:00.000Z"));
+    // The dashboard reports the goal for the week it is read in, so anchor the goal to the
+    // current week. A fixed date only matched during the week of 2026-09-07.
+    const weekStart = currentWeekStart();
     const saved = await saveWeeklyReadingGoal(teacher.id, { childProfileId: learner.profile.id, weekStart, targetMinutes: 30, targetSessions: 4, note: "Take your time with new words." });
     expect(saved).toMatchObject({ childProfileId: learner.profile.id, weekStart, targetMinutes: 30, targetSessions: 4 });
     expect((await getTeacherDashboard(teacher.id)).pupils).toEqual(expect.arrayContaining([expect.objectContaining({ childProfileId: learner.profile.id, weeklyGoal: expect.objectContaining({ targetMinutes: 30, targetSessions: 4 }) })]));

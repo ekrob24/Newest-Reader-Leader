@@ -753,3 +753,6 @@ select:focus,
 .synthetic-data-notice p { margin: 0; }
 .synthetic-data-notice strong { color: #fff; }
 @media (max-width: 640px) { .synthetic-data-notice { padding: 9px 14px; font-size: 11px; } }
+
+/* The child keeps reading to a microphone that stopped listening unless something says so. */
+.kids-mic-warning { margin: 14px auto 0; max-width: 620px; padding: 11px 16px; border-radius: 14px; background: #fff1e2; color: #7a4406; font-size: 14px; font-weight: 700; text-align: center; }

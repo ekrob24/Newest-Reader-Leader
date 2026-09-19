@@ -67,3 +67,28 @@ export function isReadingPageComplete(page: ReadingPage | undefined, states: Liv
     return index < lastRead;
   });
 }
+
+/**
+ * The word the reader is actually on, if any.
+ *
+ * Not simply "the first flagged word". Once a later word on the page has been read aloud,
+ * the reader has gone past the flagged one and is somewhere else; continuing to point a
+ * "tap this word to hear it" prompt at it tells them to fix something they have left behind,
+ * and reads as the screen refusing to let them continue. It is also advice they cannot act
+ * on: repeating a word out of sequence never re-matches it, because the transcript is
+ * aligned from the beginning in order.
+ */
+export function activeRetryWord(
+  pageStates: LiveWordState[],
+  mode: "GUIDED_PRACTICE" | "ASSISTED_PRACTICE" | "MONTHLY_ASSESSMENT",
+): LiveWordState | undefined {
+  if (mode === "MONTHLY_ASSESSMENT") return undefined;
+  const current = pageStates.find(state => state.status === "current");
+  if (current) return current;
+  let lastRead = -1;
+  pageStates.forEach((state, index) => {
+    if (state.status === "correct" || state.status === "retried_correct") lastRead = index;
+  });
+  return pageStates.find((state, index) =>
+    state.status === "incorrect" && state.movedOn !== true && state.attempts < 3 && index > lastRead);
+}

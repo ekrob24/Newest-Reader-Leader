@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createReadingPages, isReadingPageComplete } from "../shared/readingPagination";
+import { activeRetryWord, createReadingPages, isReadingPageComplete } from "../shared/readingPagination";
 import { initialLiveWordStates } from "../shared/liveWordStates";
 import type { LiveWordState } from "../shared/liveWordStates";
 
@@ -103,5 +103,43 @@ describe("a word the reader has already gone past does not hold the page", () =>
     const halfRead = initialLiveWordStates(passage).map((state, index) =>
       index < 4 ? { ...state, status: "correct" as const, attempts: 1 } : state);
     expect(isReadingPageComplete(page as never, halfRead, "ASSISTED_PRACTICE")).toBe(false);
+  });
+});
+
+describe("the retry prompt points at the word the reader is on", () => {
+  // The reported page, exactly: "Amina stood very still, then watched it hurry safely under
+  // the hedge." with "it" flagged and every word after it read aloud.
+  const passage = "Amina stood very still then watched it hurry safely under the hedge";
+  const readPast = initialLiveWordStates(passage).map((state, index) =>
+    index === 6 ? { ...state, status: "incorrect" as const, attempts: 1 } : { ...state, status: "correct" as const, attempts: 1 });
+
+  it("says nothing about a word the reader has already gone past", () => {
+    // Prompting here tells a child to fix something behind them, and it is advice they
+    // cannot act on: repeating a word out of sequence never re-matches it.
+    expect(activeRetryWord(readPast, "ASSISTED_PRACTICE")).toBeUndefined();
+  });
+
+  it("points at the flagged word while the reader is still on it", () => {
+    const onIt = initialLiveWordStates(passage).map((state, index) =>
+      index < 6 ? { ...state, status: "correct" as const } : index === 6 ? { ...state, status: "incorrect" as const, attempts: 1 } : state);
+    expect(activeRetryWord(onIt, "ASSISTED_PRACTICE")?.text).toBe("it");
+  });
+
+  it("prefers the word the reader has actually reached", () => {
+    const states = initialLiveWordStates(passage).map((state, index) =>
+      index === 2 ? { ...state, status: "incorrect" as const, attempts: 1 }
+      : index < 5 ? { ...state, status: "correct" as const }
+      : index === 5 ? { ...state, status: "current" as const } : state);
+    expect(activeRetryWord(states, "ASSISTED_PRACTICE")?.text).toBe("watched");
+  });
+
+  it("says nothing once the child has chosen to leave the word", () => {
+    const left = initialLiveWordStates(passage).map((state, index) =>
+      index < 6 ? { ...state, status: "correct" as const } : index === 6 ? { ...state, status: "incorrect" as const, attempts: 1, movedOn: true } : state);
+    expect(activeRetryWord(left, "ASSISTED_PRACTICE")).toBeUndefined();
+  });
+
+  it("never prompts during a monthly assessment, which does not ask for retries", () => {
+    expect(activeRetryWord(readPast, "MONTHLY_ASSESSMENT")).toBeUndefined();
   });
 });

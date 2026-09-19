@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { childProfiles, readingSessions, schools, users, type StoredIntervention } from "../drizzle/schema";
-import { getAccentFairnessSummary, computeLiveFairness } from "./accentMetrics";
+import { getAccentFairnessSummary, computeFlagOverturnRate } from "./accentMetrics";
 import { getDb } from "./db";
 import { listSessionsForAccentFairness } from "./readerDb";
 import { ensureTestSchool } from "./tenancyFixture";
@@ -51,46 +51,46 @@ afterAll(async () => {
 
 describe.skipIf(!databaseAvailable)("accent fairness is measured per school", () => {
   it("reports each school its own live figure, not a pooled cross-tenant one", async () => {
-    // Oakfield: 2 upheld variants, 1 reversal  -> false-correction 1/3 = 33%
+    // Oakfield: 2 upheld variants, 1 reversal  -> flag overturn 1/3 = 33%
     const oakfield = await seedSchool(`${testKey}-oakfield`, "Oakfield NS", [
       [decided("three", true, "confirmed"), decided("path", true, "confirmed")],
       [decided("brought", false, "overridden")],
     ]);
-    // Rivermount: 1 upheld variant, 3 reversals -> false-correction 3/4 = 75%
+    // Rivermount: 1 upheld variant, 3 reversals -> flag overturn 3/4 = 75%
     const rivermount = await seedSchool(`${testKey}-rivermount`, "Rivermount NS", [
       [decided("with", true, "confirmed"), decided("month", false, "overridden")],
       [decided("north", false, "overridden"), decided("teeth", false, "overridden")],
     ]);
 
-    const oakfieldLive = computeLiveFairness(await listSessionsForAccentFairness({ schoolId: oakfield }));
-    const rivermountLive = computeLiveFairness(await listSessionsForAccentFairness({ schoolId: rivermount }));
+    const oakfieldReview = computeFlagOverturnRate(await listSessionsForAccentFairness({ schoolId: oakfield }));
+    const rivermountReview = computeFlagOverturnRate(await listSessionsForAccentFairness({ schoolId: rivermount }));
 
-    expect(oakfieldLive).toMatchObject({ totalReviewed: 3, falseCorrectionRatePct: 33 });
-    expect(rivermountLive).toMatchObject({ totalReviewed: 4, falseCorrectionRatePct: 75 });
+    expect(oakfieldReview).toMatchObject({ totalReviewed: 3, flagOverturnRatePct: 33 });
+    expect(rivermountReview).toMatchObject({ totalReviewed: 4, flagOverturnRatePct: 75 });
 
     // What the dashboard reported before the predicate landed: one figure pooled across every
     // school in the database. Recorded here so the bug stays evidenced rather than asserted.
     const db = await getDb();
     if (!db) throw new Error("Database is unavailable for integration coverage.");
-    const pooled = computeLiveFairness(
+    const pooled = computeFlagOverturnRate(
       await db.select({ id: readingSessions.id, interventions: readingSessions.interventions })
         .from(readingSessions)
         .where(eq(readingSessions.schoolId, oakfield)),
     );
-    const bothSchools = computeLiveFairness([
+    const bothSchools = computeFlagOverturnRate([
       ...(await listSessionsForAccentFairness({ schoolId: oakfield })),
       ...(await listSessionsForAccentFairness({ schoolId: rivermount })),
     ]);
-    expect(bothSchools).toMatchObject({ totalReviewed: 7, falseCorrectionRatePct: 57 });
+    expect(bothSchools).toMatchObject({ totalReviewed: 7, flagOverturnRatePct: 57 });
     // Neither school's own figure equals the pooled one, which is the whole point.
-    expect(bothSchools.falseCorrectionRatePct).not.toBe(oakfieldLive.falseCorrectionRatePct);
-    expect(bothSchools.falseCorrectionRatePct).not.toBe(rivermountLive.falseCorrectionRatePct);
+    expect(bothSchools.flagOverturnRatePct).not.toBe(oakfieldReview.flagOverturnRatePct);
+    expect(bothSchools.flagOverturnRatePct).not.toBe(rivermountReview.flagOverturnRatePct);
     expect(pooled).toMatchObject({ totalReviewed: 3 });
   });
 
   it("leaves the curated contrast untouched at 16 pairs", async () => {
     const summary = getAccentFairnessSummary(await listSessionsForAccentFairness({ schoolId: createdSchoolIds[0] ?? 1 }));
-    expect(summary.curated.total).toBe(16);
-    expect(summary.curated.baseline.flagged).toBeGreaterThan(summary.curated.readerLeader.flagged);
+    expect(summary.curated.curatedPairs).toBe(16);
+    expect(summary.curated.baseline.flaggedOfCurated).toBeGreaterThan(summary.curated.readerLeader.flaggedOfCurated);
   });
 });

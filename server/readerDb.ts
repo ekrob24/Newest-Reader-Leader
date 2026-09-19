@@ -636,9 +636,9 @@ export async function getTeacherDashboard(scope: TenantScope, teacherUserId: num
  *
  * Previously the dashboard selected every readingSessions row in the database with no
  * predicate, so every teacher saw one cross-tenant figure pooled from all schools. The
- * selection and shape are unchanged; only its scope is. What computeLiveFairness computes
- * from these rows is deliberately untouched — the two competing false-correction definitions
- * in the project remain an open decision.
+ * selection and shape are unchanged; only its scope is. What computeFlagOverturnRate computes
+ * from these rows is deliberately untouched. Note it is a flag overturn rate, not a per-word
+ * false-correction rate; see the naming note at the top of accentMetrics.ts.
  */
 export async function listSessionsForAccentFairness(scope: TenantScope) {
   const db = await scopedDb(scope);

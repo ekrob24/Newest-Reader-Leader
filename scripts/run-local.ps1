@@ -83,8 +83,8 @@ if ($LASTEXITCODE -eq 3) {
 } elseif ($LASTEXITCODE -ne 0) {
   Write-Host ""
   Write-Host "Preparing the database failed. Not starting the app." -ForegroundColor Red
-  Write-Host "The message above this line says why. The usual cause is the MySQL root password:"
-  Write-Host "re-run with the one you set, for example"
+  Write-Host "The message just above this line says why. If it mentions the login being"
+  Write-Host "rejected, re-run with the MySQL root password you set, for example"
   Write-Host ('  powershell -ExecutionPolicy Bypass -File ' + '.' + [char]92 + 'scripts' + [char]92 + 'run-local.ps1 -MysqlPassword "yourpassword"')
   exit 1
 }

@@ -10,7 +10,7 @@
  * the browser journey both need the seeded record to start undecided, and a preview seeded on
  * top of a used database silently loses that.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import mysql from "mysql2/promise";
 
 const url = process.env.DATABASE_URL;
@@ -53,7 +53,10 @@ async function main() {
   }
 
   console.log("Applying migrations…");
-  execFileSync("pnpm", ["drizzle-kit", "migrate"], { stdio: "inherit" });
+  // Through a shell on purpose. On Windows pnpm is pnpm.cmd, and execFileSync cannot launch
+  // a .cmd directly — it fails with ENOENT naming a binary that is plainly on the PATH.
+  // execSync goes via the platform shell, which resolves it on both.
+  execSync("pnpm drizzle-kit migrate", { stdio: "inherit" });
 
   console.log("Provisioning the demo cohort…");
   // Imported after the migrations, so the schema the code expects is already there.

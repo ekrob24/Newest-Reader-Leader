@@ -41,7 +41,8 @@ if [ "$seed_status" -eq 3 ]; then
 elif [ "$seed_status" -ne 0 ]; then
   echo
   echo "Preparing the database failed. Not starting the app."
-  echo "The message above says why; the usual cause is the MySQL root password."
+  echo "The message just above says why. If it mentions the login being rejected, re-run as"
+  echo '  MYSQL_ROOT_PASSWORD="yourpassword" ./scripts/run-local.sh' 
   exit 1
 fi
 

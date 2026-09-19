@@ -39,10 +39,16 @@ export function getSessionCookieOptions(
   //       ? hostname
   //       : undefined;
 
+  const secure = isSecureRequest(req);
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
-    secure: isSecureRequest(req),
+    // SameSite=None is only legal together with Secure. Browsers reject the whole cookie when
+    // it is sent without, so over plain HTTP the session silently never persists and the
+    // sign-in screen simply reappears — indistinguishable from a wrong password. Lax is the
+    // correct value for a plain-HTTP origin and behaves identically for this app, which is
+    // same-site throughout.
+    sameSite: secure ? "none" : "lax",
+    secure,
   };
 }

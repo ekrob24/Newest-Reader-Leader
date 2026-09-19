@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
  * Raise this when tests are added; it is a floor, not an expectation. Lowering it is a
  * deliberate act that should appear in a diff, because it means coverage was removed.
  */
-const MINIMUM_TESTS = 184;
+const MINIMUM_TESTS = 188;
 
 const reportPath = process.argv[2];
 if (!reportPath) {

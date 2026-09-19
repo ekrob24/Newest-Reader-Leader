@@ -7,6 +7,7 @@ import { isSessionId } from "../../shared/sessionId";
 import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
+import { buildExerciseGenerationRequest } from "../exercisePrompt";
 import { extractReadingMaterial } from "../documentExtraction";
 import { createReadingReport } from "../readerReports";
 import { scoreQuiz } from "../quizPolicy";
@@ -213,12 +214,10 @@ export const readerLeaderRouter = router({
       const materials = await listTeacherMaterials(tenantScope(ctx), ctx.user.id);
       const material = materials.find(item => item.id === input.materialId);
       if (!material) throw new TRPCError({ code: "FORBIDDEN", message: "This material is not available to your class." });
-      const prompt = `Create a concise, encouraging comprehension activity for children aged 8–10. Reading level: ${material.readingLevel}. Reading text:\n\n${material.sourceText.slice(0, 7000)}\n\nReturn only the requested structured result. Use accessible language. Include 3–6 meaningful vocabulary terms and 3–4 multiple-choice comprehension questions. Do not include sensitive, frightening, discriminatory, or adult content. Avoid diagnosing reading ability.`;
-      const result = await invokeLLM({
-        model: "gpt-5-mini",
-        messages: [{ role: "system", content: "You are a primary literacy specialist creating safe, useful teacher-reviewed materials." }, { role: "user", content: prompt }],
-        response_format: { type: "json_schema", json_schema: { name: "reading_exercise_set", strict: true, schema: { type: "object", properties: { vocabulary: { type: "array", items: { type: "object", properties: { word: { type: "string" }, childFriendlyMeaning: { type: "string" } }, required: ["word", "childFriendlyMeaning"], additionalProperties: false }, minItems: 3, maxItems: 6 }, questions: { type: "array", items: { type: "object", properties: { prompt: { type: "string" }, options: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 4 }, answer: { type: "string" }, explanation: { type: "string" } }, required: ["prompt", "options", "answer", "explanation"], additionalProperties: false }, minItems: 3, maxItems: 4 }, activity: { type: "string" } }, required: ["vocabulary", "questions", "activity"], additionalProperties: false } } },
-      });
+      // The payload is built from the passage alone, by the only module allowed to decide
+      // what leaves this system for the LLM provider. Passing `material` here is a compile
+      // error: it carries teacher, school and storage fields that must not be sent.
+      const result = await invokeLLM(buildExerciseGenerationRequest({ title: material.title, readingLevel: material.readingLevel, sourceText: material.sourceText }, "gpt-5-mini"));
       const content = llmContentAsText(result.choices[0]?.message.content ?? "");
       const exerciseSet = assertSafeExerciseSet(exerciseSetSchema.parse(JSON.parse(content)));
       const saved = await saveGeneratedExercises(tenantScope(ctx), material.id, exerciseSet, "gpt-5-mini");

@@ -22,8 +22,16 @@ Options:
 import argparse
 import difflib
 import json
+import os
 import sys
 import time
+
+# Before anything imports huggingface_hub. Its cache symlinks by default, and on Windows
+# creating a symlink needs Developer Mode or an administrator, so the model download dies
+# with "WinError 1314: A required privilege is not held by the client" after fetching the
+# files it then cannot link. Copying instead costs some disk and always works.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 PASSAGE = (
     "Amina carried a little lantern into the garden at dusk. "
@@ -115,6 +123,11 @@ def main():
         model = WhisperModel(args.model, device="cpu", compute_type="int8")
     except Exception as error:
         print(f"MODEL LOAD FAILED: {type(error).__name__}: {error}")
+        if "1314" in str(error) or "symlink" in str(error).lower():
+            print("\nThat is the Windows symlink privilege. This script already disables symlinks,")
+            print("so a half-written cache from an earlier attempt is the likely cause. Delete it:")
+            print("    Remove-Item -Recurse -Force $env:USERPROFILE\\.cache\\huggingface")
+            print("then run this again.")
         return 1
     print(f"loaded in {time.time() - started:.1f}s")
 

@@ -4,6 +4,7 @@ import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { scopeForUser } from "../tenantScope";
 import { isSessionId } from "../../shared/sessionId";
+import { audioAbsenceSummary } from "../../shared/audioRetention";
 import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
@@ -75,6 +76,7 @@ import {
   setUserRole,
 } from "../readerDb";
 import { storageGet, storagePut } from "../storage";
+import { classifyStorageOutcome } from "../audioOutcome";
 import { buildWordTimings } from "../wordTiming";
 import { createMonthlyTrendCsv, monthlyTrendFilename } from "../trendExport";
 import { createIrishVariantCsv, irishVariantFilename } from "../irishVariantExport";
@@ -273,18 +275,22 @@ export const readerLeaderRouter = router({
         storagePut(`reader-leader/recordings/${ctx.user.id}/session-${Date.now()}.${extension}`, bytes, mimeType),
         transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: transcriptionPrompt }),
       ]);
-      if (storedResult.status === "rejected") throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Your recording could not be saved. Please try again." });
-      const stored = storedResult.value;
+      // A session is valid without its audio. The retention model is that audio is scored and
+      // discarded in the same request, so a null key is the ordinary production case, not an
+      // error. Degrade exactly as a failed transcription does — but never silently: record
+      // which kind of null this is so the review surface can say why no clip exists.
+      if (storedResult.status === "rejected") console.error("[readerLeader] recording not stored:", storedResult.reason);
+      const { audioStorageKey, audioStatus } = classifyStorageOutcome(storedResult);
       const transcription = transcriptionResult.status === "fulfilled" && !("error" in transcriptionResult.value) ? transcriptionResult.value : null;
       const transcriptionStatus = transcription ? "transcribed" as const : "guided" as const;
       const transcript = transcription?.text || input.fallbackTranscript.trim();
       if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Read a few words before finishing so Reader Leader can prepare a report." });
       const analysis = analyseReadingText(input.expectedText, transcript, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport, irishVariantContext.variants);
-      const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
+      const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved reading record." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
       const wordTimings = buildWordTimings(transcript, analysis.durationSeconds, transcription?.segments);
-      const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey: stored.key, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
+      const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey, audioStatus, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
-      return { session, analysis, transcriptionStatus };
+      return { session, analysis, transcriptionStatus, audioStatus };
     }),
     save: protectedProcedure.input(z.object({
       childProfileId: z.number().int().positive(),
@@ -313,7 +319,7 @@ export const readerLeaderRouter = router({
           heardWord: event.recognisedWord ?? undefined,
           provisionalIrishEnglish: event.provisionalIrishEnglish,
           action,
-          note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : event.action === "practise_gently" ? "Try that word again when you are ready." : "Reading event noted without interruption.",
+          note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved reading record." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : event.action === "practise_gently" ? "Try that word again when you are ready." : "Reading event noted without interruption.",
         };
       });
       const wordTimings = buildWordTimings(analysis.transcript, analysis.durationSeconds);
@@ -345,7 +351,8 @@ export const readerLeaderRouter = router({
     audioUrl: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       const playback = await getSessionPlayback(tenantScope(ctx), input.sessionId);
       const session = playback?.session;
-      if (!session || !session.audioStorageKey) throw new TRPCError({ code: "NOT_FOUND", message: "This saved session does not have an audio recording." });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "This saved reading session is no longer available." });
+      if (!session.audioStorageKey) throw new TRPCError({ code: "NOT_FOUND", message: `${audioAbsenceSummary(session.audioStatus)}. The saved transcript and word states are still available for review.` });
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This recording is not available to your account." });
       const audio = await storageGet(session.audioStorageKey);

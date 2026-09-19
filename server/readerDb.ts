@@ -27,6 +27,7 @@ import {
   type QuizAnswer,
   type StoredIntervention,
   type AssessmentMode,
+  type AudioRetentionStatus,
   type StoredWordState,
   type StoredWordTiming,
   type ReadingLanguageSupport,
@@ -442,6 +443,9 @@ export async function saveReadingSession(scope: TenantScope, input: {
   wordsCorrectPerMinute: number;
   durationSeconds: number;
   audioStorageKey?: string | null;
+  /** Why audio is, or is not, stored. Defaults from the key so a caller that never attempted
+   *  storage records "not_captured" rather than an unexplained null. */
+  audioStatus?: AudioRetentionStatus;
   assessmentMode?: AssessmentMode;
   languageSupport?: ReadingLanguageSupport;
   practiceWords: string[];
@@ -461,7 +465,7 @@ export async function saveReadingSession(scope: TenantScope, input: {
   const capture = resolveCaptureTime(capturedAt, new Date());
   const wordStates = input.wordStates ?? [];
   const wordTimings = input.wordTimings ?? [];
-  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates, wordTimings, completed: 1 });
+  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, audioStatus: input.audioStatus ?? (input.audioStorageKey ? "stored" : "not_captured"), assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates, wordTimings, completed: 1 });
 
   // One row per word, from the same evidence as the JSON columns above. Additive: the JSON
   // stays the source of truth until everything downstream reads the table.
@@ -498,7 +502,7 @@ export async function listTeacherProvisionalMatches(scope: TenantScope, teacherU
   if (filters.childProfileId) conditions.push(eq(provisionalMatchReviews.childProfileId, filters.childProfileId));
   if (filters.startDate) conditions.push(gte(readingSessions.createdAt, new Date(`${filters.startDate}T00:00:00.000Z`)));
   if (filters.endDate) conditions.push(lte(readingSessions.createdAt, new Date(`${filters.endDate}T23:59:59.999Z`)));
-  return db.select({ id: provisionalMatchReviews.id, sessionId: provisionalMatchReviews.sessionId, childProfileId: provisionalMatchReviews.childProfileId, classId: provisionalMatchReviews.classId, expectedWord: provisionalMatchReviews.expectedWord, recognisedWord: provisionalMatchReviews.recognisedWord, source: provisionalMatchReviews.source, status: provisionalMatchReviews.status, storyTitle: readingSessions.storyTitle, childName: childProfiles.displayName }).from(provisionalMatchReviews)
+  return db.select({ id: provisionalMatchReviews.id, sessionId: provisionalMatchReviews.sessionId, childProfileId: provisionalMatchReviews.childProfileId, classId: provisionalMatchReviews.classId, expectedWord: provisionalMatchReviews.expectedWord, recognisedWord: provisionalMatchReviews.recognisedWord, source: provisionalMatchReviews.source, status: provisionalMatchReviews.status, storyTitle: readingSessions.storyTitle, audioStatus: readingSessions.audioStatus, childName: childProfiles.displayName }).from(provisionalMatchReviews)
     .innerJoin(readingSessions, eq(provisionalMatchReviews.sessionId, readingSessions.id))
     .innerJoin(childProfiles, eq(provisionalMatchReviews.childProfileId, childProfiles.id))
     .where(and(...conditions))

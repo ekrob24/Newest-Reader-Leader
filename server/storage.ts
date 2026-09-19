@@ -4,12 +4,21 @@
 
 import { ENV } from "./_core/env";
 
+/** Thrown when object storage is not configured at all, as opposed to configured and failing.
+ *  Callers that can carry on without the object distinguish the two so the reason is recorded. */
+export class StorageUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StorageUnavailableError";
+  }
+}
+
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
   const forgeKey = ENV.forgeApiKey;
 
   if (!forgeUrl || !forgeKey) {
-    throw new Error(
+    throw new StorageUnavailableError(
       "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY",
     );
   }

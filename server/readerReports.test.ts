@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createReadingReport } from "./readerReports";
 import { scoreQuiz } from "./quizPolicy";
 
-const sessions = [{ id: "01K5H2VQ0M0000000000000001", schoolId: 1, childProfileId: 5, materialId: null, storyTitle: "The Moonlight Kite", transcript: "Mina found a kite.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 75, audioStorageKey: null, completed: 1, practiceWords: ["glimmered"], interventions: [], assessmentMode: "ASSISTED_PRACTICE" as const, languageSupport: "STANDARD_ENGLISH" as const, wordStates: [], wordTimings: null, capturedAt: null, capturedAtSource: "server" as const, createdAt: new Date() }];
+const sessions = [{ id: "01K5H2VQ0M0000000000000001", schoolId: 1, childProfileId: 5, materialId: null, storyTitle: "The Moonlight Kite", transcript: "Mina found a kite.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 75, audioStorageKey: null, audioStatus: "not_captured" as const, completed: 1, practiceWords: ["glimmered"], interventions: [], assessmentMode: "ASSISTED_PRACTICE" as const, languageSupport: "STANDARD_ENGLISH" as const, wordStates: [], wordTimings: null, capturedAt: null, capturedAtSource: "server" as const, createdAt: new Date() }];
 
 describe("role-specific reading reports", () => {
   it("creates a positive child celebration without diagnostic language", () => {

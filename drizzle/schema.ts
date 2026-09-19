@@ -223,6 +223,12 @@ export type StoredWordTiming = { id: string; text: string; startMs: number; endM
 export const captureTimeSourceValues = ["device", "server"] as const;
 export type CaptureTimeSource = (typeof captureTimeSourceValues)[number];
 
+/** Why a session has, or does not have, a stored recording. A session is valid without its
+ *  audio: audio is scored and discarded in the same request, so a null key is the ordinary
+ *  case. The status says which kind of null it is, so a null is never mistaken for a bug. */
+export const audioRetentionStatusValues = ["stored", "storage_unavailable", "storage_rejected", "not_captured"] as const;
+export type AudioRetentionStatus = (typeof audioRetentionStatusValues)[number];
+
 /**
  * `id` is a ULID generated where the reading happens, not by the database — see
  * shared/sessionId.ts. `capturedAt` is the classroom tablet's own clock as reported, kept
@@ -240,6 +246,8 @@ export const readingSessions = mysqlTable("readingSessions", {
   wordsCorrectPerMinute: int("wordsCorrectPerMinute").notNull(),
   durationSeconds: int("durationSeconds").notNull(),
   audioStorageKey: varchar("audioStorageKey", { length: 512 }),
+  /** Always set. "stored" iff audioStorageKey is non-null; otherwise the reason it is null. */
+  audioStatus: mysqlEnum("audioStatus", audioRetentionStatusValues).notNull().default("not_captured"),
   completed: int("completed").notNull().default(1),
   assessmentMode: mysqlEnum("assessmentMode", assessmentModeValues).notNull().default("ASSISTED_PRACTICE"),
   languageSupport: mysqlEnum("languageSupport", readingLanguageSupportValues).notNull().default("STANDARD_ENGLISH"),

@@ -20,6 +20,7 @@ const CONTAMINATED = {
   transcript: "the tin pat was cot",
   wordStates: [{ id: "w1", text: "thin", status: "incorrect", attempts: 2 }],
   audioStorageKey: "audio/amina-2026-09-19.wav",
+  audioStatus: "stored" as const,
   sessionId: "01K5H2VQ0M0000000000000001",
 };
 

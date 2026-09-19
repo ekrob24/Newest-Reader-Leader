@@ -1,6 +1,8 @@
 import { trpc } from "@/lib/trpc";
 import { PLACEHOLDER_SESSION_ID } from "@shared/sessionId";
-import { Download, Play, Volume2 } from "lucide-react";
+import { audioAbsenceSummary, hasStoredAudio } from "@shared/audioRetention";
+import type { AudioRetentionStatus } from "@shared/types";
+import { Download, Headphones, Play, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -107,7 +109,14 @@ function SessionAudioControl({ sessionId, label, highlight = false }: { sessionI
   return <><audio ref={audioRef} preload="metadata" data-testid={highlight ? "reading-highlight-audio" : "session-audio"} /><button className={`audio-action ${highlight ? "best-moment-action" : ""}`} onClick={() => void play()} disabled={audioUrl.isFetching || playing}><Play size={14} fill="currentColor" /> {audioUrl.isFetching ? "Loading…" : playing ? "Playing…" : label}</button></>;
 }
 
-export function SessionAudioButton({ sessionId, label = "Play recording" }: { sessionId?: string | null; label?: string }) {
+/** An audio control is offered only when there is audio to play. Where there is none, the
+ *  reason is stated: an empty player is worse than an honest line about the missing recording. */
+function AudioUnavailableNote({ status }: { status: AudioRetentionStatus }) {
+  return <span className="audio-unavailable" data-testid="audio-unavailable"><Headphones size={14} /> {audioAbsenceSummary(status)}</span>;
+}
+
+export function SessionAudioButton({ sessionId, label = "Play recording", audioStatus }: { sessionId?: string | null; label?: string; audioStatus?: AudioRetentionStatus | null }) {
+  if (audioStatus && !hasStoredAudio(audioStatus)) return <AudioUnavailableNote status={audioStatus} />;
   return <SessionAudioControl sessionId={sessionId} label={label} />;
 }
 
@@ -115,7 +124,7 @@ export function SessionHighlightButton({ sessionId, label = "Hear a reading high
   return <SessionAudioControl sessionId={sessionId} label={label} highlight />;
 }
 
-export function SessionTranscriptPlayer({ sessionId }: { sessionId?: string | null }) {
+export function SessionTranscriptPlayer({ sessionId, audioStatus }: { sessionId?: string | null; audioStatus?: AudioRetentionStatus | null }) {
   const [playback, setPlayback] = useState<PlaybackData | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStopTimerRef = useRef<number | null>(null);
@@ -160,6 +169,8 @@ export function SessionTranscriptPlayer({ sessionId }: { sessionId?: string | nu
       }, Math.max(150, timing.endMs - timing.startMs + 150));
     } catch { toast("Your browser blocked audio playback. Please try again."); }
   };
+
+  if (audioStatus && !hasStoredAudio(audioStatus)) return <section className="transcript-player"><div><div className="kicker">Word-linked playback</div><h3>No recording to play for this reading.</h3><p>{audioAbsenceSummary(audioStatus)}. The saved transcript and word states below still support a teacher decision.</p></div><AudioUnavailableNote status={audioStatus} /></section>;
 
   return <section className="transcript-player"><div><div className="kicker">Word-linked playback</div><h3>Listen closely to a saved reading moment.</h3><p>Choose a word to jump to its matching audio moment.</p></div>{!playback ? <button className="audio-action" onClick={() => void load()} disabled={audioUrl.isFetching}><Play size={14} fill="currentColor" /> {audioUrl.isFetching ? "Loading…" : "Open word playback"}</button> : <div className="timed-transcript"><audio ref={audioRef} src={playback.url} preload="metadata" data-testid="word-linked-audio" />{playback.wordTimings.length ? playback.wordTimings.map(timing => <button key={timing.id} onClick={() => void hearWord(timing)} title={`Play ${timing.text}`}><Volume2 size={12} /> {timing.text}</button>) : <p>Word timing is not available for this earlier recording.</p>}</div>}</section>;
 }

@@ -60,6 +60,16 @@ describe.skipIf(!databaseAvailable)("audio retention status", () => {
     expect(saved.audioStatus).toBe("stored");
   });
 
+  it("can record that audio was captured, scored and deliberately discarded", async () => {
+    // The retention commitment schools are given. It is a success state with no key, which is
+    // why it cannot be represented by any of the four failure-or-absence statuses.
+    const { scope, childProfileId } = await fixture();
+    const saved = await saveReadingSession(scope, { ...baseSession(childProfileId), audioStatus: "discarded_by_policy" });
+    expect(saved.audioStorageKey).toBeNull();
+    expect(saved.audioStatus).toBe("discarded_by_policy");
+    expect((await getSessionById(scope, saved.id))?.audioStatus).toBe("discarded_by_policy");
+  });
+
   it("never leaves a row whose key and status disagree", async () => {
     const { db, scope, childProfileId } = await fixture();
     const withKey = await saveReadingSession(scope, { ...baseSession(childProfileId), audioStorageKey: "reader-leader/recordings/1/y.webm" });

@@ -134,6 +134,13 @@
       "when": 1789827718773,
       "tag": "0018_closed_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1789828595384,
+      "tag": "0019_exotic_talos",
+      "breakpoints": true
     }
   ]
 }

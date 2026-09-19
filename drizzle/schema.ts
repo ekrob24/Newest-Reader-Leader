@@ -225,8 +225,14 @@ export type CaptureTimeSource = (typeof captureTimeSourceValues)[number];
 
 /** Why a session has, or does not have, a stored recording. A session is valid without its
  *  audio: audio is scored and discarded in the same request, so a null key is the ordinary
- *  case. The status says which kind of null it is, so a null is never mistaken for a bug. */
-export const audioRetentionStatusValues = ["stored", "storage_unavailable", "storage_rejected", "not_captured"] as const;
+ *  case. The status says which kind of null it is, so a null is never mistaken for a bug.
+ *
+ *  "discarded_by_policy" is the success case, not an absence: it is the retention commitment
+ *  the school-facing data protection summary makes, and it is what turns that commitment from
+ *  a claim into a queryable fact — the distribution of these statuses across a term is the
+ *  evidence. It is deliberately separate from "not_captured", which means nothing was ever
+ *  sent, and from the two storage statuses, which mean something went wrong. */
+export const audioRetentionStatusValues = ["stored", "discarded_by_policy", "storage_unavailable", "storage_rejected", "not_captured"] as const;
 export type AudioRetentionStatus = (typeof audioRetentionStatusValues)[number];
 
 /**

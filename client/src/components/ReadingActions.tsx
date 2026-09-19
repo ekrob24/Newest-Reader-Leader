@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { PLACEHOLDER_SESSION_ID } from "@shared/sessionId";
-import { audioAbsenceSummary, hasStoredAudio } from "@shared/audioRetention";
+import { audioAbsenceSummary, hasStoredAudio, isAudioFailure } from "@shared/audioRetention";
 import type { AudioRetentionStatus } from "@shared/types";
 import { Download, Headphones, Play, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -112,7 +112,8 @@ function SessionAudioControl({ sessionId, label, highlight = false }: { sessionI
 /** An audio control is offered only when there is audio to play. Where there is none, the
  *  reason is stated: an empty player is worse than an honest line about the missing recording. */
 function AudioUnavailableNote({ status }: { status: AudioRetentionStatus }) {
-  return <span className="audio-unavailable" data-testid="audio-unavailable"><Headphones size={14} /> {audioAbsenceSummary(status)}</span>;
+  // A deliberate discard is the retention commitment working, so it is never styled as a fault.
+  return <span className={`audio-unavailable ${isAudioFailure(status) ? "audio-fault" : "audio-by-design"}`} data-testid="audio-unavailable"><Headphones size={14} /> {audioAbsenceSummary(status)}</span>;
 }
 
 export function SessionAudioButton({ sessionId, label = "Play recording", audioStatus }: { sessionId?: string | null; label?: string; audioStatus?: AudioRetentionStatus | null }) {

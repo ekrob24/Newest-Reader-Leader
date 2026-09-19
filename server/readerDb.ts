@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, lte } from "drizzle-orm";
 import {
   AccountRole,
   childProfiles,
@@ -405,7 +405,9 @@ export async function listAssignedMaterialsForChild(scope: TenantScope, childUse
     .innerJoin(classEnrollments, eq(childProfiles.id, classEnrollments.childProfileId))
     .innerJoin(materialAssignments, eq(classEnrollments.classId, materialAssignments.classId))
     .innerJoin(readingMaterials, eq(materialAssignments.materialId, readingMaterials.id))
-    .leftJoin(readingExercises, eq(readingMaterials.id, readingExercises.materialId))
+    // Unapproved exercises must not join: a teacher can generate a quiz after the passage is
+    // already assigned, and until they approve it the child must see the passage with no quiz.
+    .leftJoin(readingExercises, and(eq(readingMaterials.id, readingExercises.materialId), isNotNull(readingExercises.approvedAt)))
     .where(and(eq(childProfiles.userId, childUserId), eq(readingMaterials.status, "assigned")))
     .orderBy(desc(materialAssignments.assignedAt));
 }

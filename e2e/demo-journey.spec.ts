@@ -88,6 +88,10 @@ test("the demo journey", async ({ page, context }) => {
   //    the transcript and silently does nothing.
   await page.getByRole("button", { name: /^Tap to Read$/ }).click();
   await expect(page.getByText(/Page 4 of 4/)).toBeVisible();
+  // A real read lasts seconds. The recorder emits its first chunk after one second, and the
+  // client abandons the save — silently, down the guided path — when the blob is empty.
+  // Finishing instantly means the server is never called at all.
+  await page.waitForTimeout(2500);
   await page.getByRole("button", { name: /Finish story/ }).click();
 
   // 6. The report appears and confirms the practice was saved.

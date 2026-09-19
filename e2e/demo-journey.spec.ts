@@ -94,9 +94,15 @@ test("the demo journey", async ({ page, context }) => {
   await page.waitForTimeout(2500);
   await page.getByRole("button", { name: /Finish story/ }).click();
 
-  // 6. The report appears and confirms the practice was saved.
+  // 6. The report appears, and the screen states what the SERVER said about the save.
+  //    The previous assertion here looked for "Your reading practice was saved", a string the
+  //    client produced whatever happened — so it passed while nothing was being written at
+  //    all. This reads the save state the report renders from the mutation result, so a
+  //    reading the server rejects cannot show the same screen as one it accepted.
   await expect(page.getByText(/That was a brave read/i)).toBeVisible();
-  await expect(page.getByText(/Your reading practice was saved/i)).toBeVisible();
+  const saveState = page.getByTestId("save-state");
+  await expect(saveState).toHaveAttribute("data-save-status", "saved", { timeout: 15_000 });
+  await expect(saveState).toContainText(/Your reading is saved/i);
 
   // 7. Sign in as the teacher.
   await context.clearCookies();
@@ -112,4 +118,9 @@ test("the demo journey", async ({ page, context }) => {
   await expect(page.getByText(/Speech Review Panel/i)).toBeVisible();
   await expect(page.getByText(/flagged moments/i)).toBeVisible();
   await expect(page.getByText(/Amina/).first()).toBeVisible();
+
+  // 9. The reading the child just finished reached the teacher, and nothing is sitting in the
+  //    unrecorded-reading list — the surface that exists so a failed save is visible to
+  //    someone rather than to no one.
+  await expect(page.getByTestId("unrecorded-attempts")).toHaveCount(0);
 });

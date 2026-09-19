@@ -4,6 +4,7 @@ import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { scopeForUser } from "../tenantScope";
 import { isSessionId } from "../../shared/sessionId";
+import { unrecordedAttemptReasonValues } from "../../drizzle/schema";
 import { audioAbsenceSummary } from "../../shared/audioRetention";
 import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText, buildInterventions } from "../reader";
@@ -62,6 +63,8 @@ import {
   getSchoolBrandingForTeacher,
   saveSchoolBranding,
   seedDemoCohort,
+  recordUnrecordedReadingAttempt,
+  acknowledgeUnrecordedReadingAttempt,
   saveReadingSession,
   saveLearnerReadingSettings,
   saveWeeklyReadingGoal,
@@ -336,6 +339,24 @@ export const readerLeaderRouter = router({
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
       return saveTeacherInterventionDecision(tenantScope(ctx), input.sessionId, input.interventionIndex, input.teacherDecision);
+    }),
+    /** The child's device reporting that a reading it completed was not saved. Without this a
+     *  failed save leaves no trace anywhere a teacher can see it. */
+    recordUnrecordedAttempt: protectedProcedure.input(z.object({
+      childProfileId: z.number().int().positive(),
+      materialId: z.number().int().positive().nullable().optional(),
+      storyTitle: z.string().min(1).max(180),
+      reason: z.enum(unrecordedAttemptReasonValues),
+      detail: z.string().max(400).optional(),
+      durationSeconds: z.number().int().min(0).max(86_400).optional(),
+    })).mutation(async ({ ctx, input }) => {
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only the signed-in child can report an unsaved reading." });
+      return recordUnrecordedReadingAttempt(tenantScope(ctx), input);
+    }),
+    acknowledgeUnrecordedAttempt: protectedProcedure.input(z.object({ attemptId: sessionIdInput })).mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "teacher" && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only a teacher can clear an unsaved reading from the review list." });
+      return acknowledgeUnrecordedReadingAttempt(tenantScope(ctx), ctx.user.id, input.attemptId);
     }),
     childProgress: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);

@@ -38,7 +38,7 @@ import {
   homePracticeChecklists, learnerReadingSettings, materialAssignments, parentReminders,
   provisionalMatchReviews, quizAttempts, readerClasses, readingExercises,
   readingMaterialDetails, readingMaterials, readingSessions, schoolBranding, schools,
-  readingWords, sessionComments, teacherTermPresets, users, weeklyReadingGoals,
+  readingWords, sessionComments, teacherTermPresets, unrecordedReadingAttempts, users, weeklyReadingGoals,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -78,6 +78,7 @@ const TENANT_TABLES = new Map<unknown, (scope: TenantScope) => SQL>([
   [readingMaterials, s => eq(readingMaterials.schoolId, s.schoolId)],
   [readingSessions, s => eq(readingSessions.schoolId, s.schoolId)],
   [readingWords, s => eq(readingWords.schoolId, s.schoolId)],
+  [unrecordedReadingAttempts, s => eq(unrecordedReadingAttempts.schoolId, s.schoolId)],
   [schoolBranding, s => eq(schoolBranding.schoolId, s.schoolId)],
   [sessionComments, s => eq(sessionComments.schoolId, s.schoolId)],
   [teacherTermPresets, s => eq(teacherTermPresets.schoolId, s.schoolId)],

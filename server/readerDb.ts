@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import {
   AccountRole,
   childProfiles,
@@ -16,6 +16,7 @@ import {
   readingMaterials,
   readingSessions,
   readingWords,
+  unrecordedReadingAttempts,
   quizAttempts,
   schoolBranding,
   schools,
@@ -28,6 +29,7 @@ import {
   type StoredIntervention,
   type AssessmentMode,
   type AudioRetentionStatus,
+  type UnrecordedAttemptReason,
   type StoredWordState,
   type StoredWordTiming,
   type ReadingLanguageSupport,
@@ -479,6 +481,69 @@ export async function saveReadingSession(scope: TenantScope, input: {
   return saved;
 }
 
+/**
+ * Record that a child finished a reading and the reading was not saved.
+ *
+ * This is best-effort by nature: if the child's device cannot reach the server at all, this
+ * call cannot reach it either, and the only honest record is the one on the child's screen.
+ * It covers the case that actually happens — the server received the reading and rejected
+ * it — which is where the silent gap in a teacher's record came from.
+ */
+export async function recordUnrecordedReadingAttempt(scope: TenantScope, input: {
+  childProfileId: number;
+  materialId?: number | null;
+  storyTitle: string;
+  reason: UnrecordedAttemptReason;
+  detail?: string | null;
+  durationSeconds?: number | null;
+}) {
+  const db = await scopedDb(scope);
+  const id = newSessionId();
+  await db.insert(unrecordedReadingAttempts).values({
+    id,
+    childProfileId: input.childProfileId,
+    materialId: input.materialId ?? null,
+    storyTitle: input.storyTitle,
+    reason: input.reason,
+    detail: input.detail?.slice(0, 400) ?? null,
+    durationSeconds: input.durationSeconds ?? null,
+  });
+  const [saved] = await db.select().from(unrecordedReadingAttempts).where(eq(unrecordedReadingAttempts.id, id)).limit(1);
+  if (!saved) throw new Error("Could not record the unsaved reading attempt.");
+  return saved;
+}
+
+/** Unacknowledged gaps in the record for the learners a teacher is responsible for. */
+export async function listUnrecordedReadingAttempts(scope: TenantScope, teacherUserId: number) {
+  const db = await scopedDb(scope);
+  const classes = await db.select({ id: readerClasses.id }).from(readerClasses).where(eq(readerClasses.teacherUserId, teacherUserId));
+  const classIds = classes.map(readerClass => readerClass.id);
+  if (!classIds.length) return [];
+  return db.select({
+    id: unrecordedReadingAttempts.id,
+    childProfileId: unrecordedReadingAttempts.childProfileId,
+    childName: childProfiles.displayName,
+    storyTitle: unrecordedReadingAttempts.storyTitle,
+    reason: unrecordedReadingAttempts.reason,
+    detail: unrecordedReadingAttempts.detail,
+    durationSeconds: unrecordedReadingAttempts.durationSeconds,
+    createdAt: unrecordedReadingAttempts.createdAt,
+  }).from(unrecordedReadingAttempts)
+    .innerJoin(childProfiles, eq(unrecordedReadingAttempts.childProfileId, childProfiles.id))
+    .innerJoin(classEnrollments, eq(classEnrollments.childProfileId, childProfiles.id))
+    .where(and(isNull(unrecordedReadingAttempts.acknowledgedAt), inArray(classEnrollments.classId, classIds)))
+    .orderBy(desc(unrecordedReadingAttempts.createdAt))
+    .limit(20);
+}
+
+export async function acknowledgeUnrecordedReadingAttempt(scope: TenantScope, teacherUserId: number, attemptId: string) {
+  const db = await scopedDb(scope);
+  await db.update(unrecordedReadingAttempts).set({ acknowledgedByTeacherId: teacherUserId, acknowledgedAt: new Date() }).where(eq(unrecordedReadingAttempts.id, attemptId));
+  const [updated] = await db.select().from(unrecordedReadingAttempts).where(eq(unrecordedReadingAttempts.id, attemptId)).limit(1);
+  if (!updated) throw new Error("This unsaved reading record is not available to your account.");
+  return updated;
+}
+
 export async function getSessionById(scope: TenantScope, sessionId: string) {
   const db = await scopedDb(scope);
   const [session] = await db.select().from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
@@ -668,7 +733,7 @@ export async function getTeacherDashboard(scope: TenantScope, teacherUserId: num
   const comments = await getSessionComments(scope, sessions.map(session => session.id));
   const recentSessions = sessions.slice(0, 8).map(session => ({ ...session, childName: enrolled.find(pupil => pupil.childProfileId === session.childProfileId)?.displayName ?? "Reader", comments: comments.filter(comment => comment.sessionId === session.id) }));
   const approvedIrishVariants = await db.select().from(educatorApprovedIrishVariants).where(inArray(educatorApprovedIrishVariants.classId, classIds)).orderBy(desc(educatorApprovedIrishVariants.updatedAt));
-  return { classes: classSummaries, pupils, needsReview, provisionalMatches: await listTeacherProvisionalMatches(scope, teacherUserId), approvedIrishVariants, materials, recentSessions, classAssessmentTrend: buildMonthlyAssessmentTrend(sessions), termPresets, weeklyGoals: goalRows, weekStart, branding: await getSchoolBrandingForTeacher(scope, teacherUserId) };
+  return { classes: classSummaries, pupils, needsReview, provisionalMatches: await listTeacherProvisionalMatches(scope, teacherUserId), unrecordedAttempts: await listUnrecordedReadingAttempts(scope, teacherUserId), approvedIrishVariants, materials, recentSessions, classAssessmentTrend: buildMonthlyAssessmentTrend(sessions), termPresets, weeklyGoals: goalRows, weekStart, branding: await getSchoolBrandingForTeacher(scope, teacherUserId) };
 }
 
 /**

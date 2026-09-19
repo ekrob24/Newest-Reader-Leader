@@ -268,6 +268,35 @@ export const readingSessions = mysqlTable("readingSessions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+/** Why a reading a child completed never became a session row. */
+export const unrecordedAttemptReasonValues = ["save_rejected", "request_failed", "no_reading_evidence"] as const;
+export type UnrecordedAttemptReason = (typeof unrecordedAttemptReasonValues)[number];
+
+/**
+ * A reading that was attempted and not recorded.
+ *
+ * Without this a failed save leaves nothing at all: the child is told their reading was kept,
+ * the teacher sees no row, and the gap is invisible to everyone. The failed write is a bug;
+ * a gap in a child's record that nobody can see is the governance problem. This is the record
+ * of the absence, so a teacher can ask the child to read again rather than never learning
+ * that a reading happened.
+ */
+export const unrecordedReadingAttempts = mysqlTable("unrecordedReadingAttempts", {
+  id: varchar("id", { length: 26 }).primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
+  childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
+  materialId: int("materialId").references(() => readingMaterials.id, { onDelete: "set null" }),
+  storyTitle: varchar("storyTitle", { length: 180 }).notNull(),
+  reason: mysqlEnum("reason", unrecordedAttemptReasonValues).notNull(),
+  /** The message the child's device was given, kept verbatim so the two accounts agree. */
+  detail: varchar("detail", { length: 400 }),
+  durationSeconds: int("durationSeconds"),
+  /** Cleared by a teacher once the reading has been repeated or the gap accounted for. */
+  acknowledgedByTeacherId: int("acknowledgedByTeacherId").references(() => users.id, { onDelete: "set null" }),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 /** Each Irish English provisional transcript match remains confirmable by an authorised teacher. */
 export const provisionalMatchReviews = mysqlTable("provisionalMatchReviews", {
   id: varchar("id", { length: 26 }).primaryKey(),

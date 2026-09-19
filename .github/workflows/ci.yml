@@ -80,3 +80,88 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  browser-journey:
+    name: demo journey (browser)
+    runs-on: ubuntu-latest
+
+    # A separate job on purpose. It runs the product, not the units: it signs in as a child,
+    # reads a story with a substituted microphone and speech recogniser, and checks that the
+    # reading reaches a teacher. Its result is counted by nobody but itself — it is outside
+    # scripts/assert-test-coverage.mjs, which guards the vitest suites only.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: readerleader
+          MYSQL_DATABASE: readerleader
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -preaderleader"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=30s
+
+    env:
+      DATABASE_URL: mysql://root:readerleader@127.0.0.1:3306/readerleader
+      JWT_SECRET: ci-browser-journey-secret
+      VITE_APP_ID: reader-leader-ci
+      NODE_ENV: production
+      PORT: "3100"
+      READER_LEADER_CHILD_DEMO_PASSWORD: ci-child-demo
+      READER_LEADER_TEACHER_DEMO_PASSWORD: ci-teacher-demo
+      READER_LEADER_PARENT_DEMO_PASSWORD: ci-parent-demo
+      # OPENAI_API_KEY is deliberately absent. The journey must pass without it: transcription
+      # degrades to the live transcript, and a run that needed a key would be testing a
+      # configuration the demo does not have.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Wait for MySQL
+        run: |
+          for attempt in $(seq 1 60); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -preaderleader --silent 2>/dev/null; then
+              echo "MySQL is up after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL never became reachable." >&2
+          exit 1
+
+      - name: Apply migrations
+        run: pnpm drizzle-kit migrate
+
+      - name: Build
+        run: pnpm build
+
+      # playwright.config.ts starts the server itself and sets retries to 0. A retry would
+      # turn an intermittently broken save into a green badge, which is the failure this
+      # whole test exists to catch.
+      - name: Run the demo journey
+        run: pnpm exec playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7

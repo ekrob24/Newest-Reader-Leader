@@ -721,3 +721,20 @@ select:focus,
   .analytics-card,
   .learner-plan-card { padding: 1rem; }
 }
+
+/* A reading that was saved and a reading that was not must not look alike. */
+.save-state { display: flex; align-items: center; gap: 9px; margin: 14px 0 0; padding: 11px 14px; border-radius: 13px; font-size: 13px; font-weight: 800; }
+.save-state-saved { background: #e3f6ec; color: #1d5d3b; }
+.save-state-pending { background: #eef3ff; color: #33447a; }
+.save-state-not_attempted { background: #f3f5fa; color: #4a5570; }
+.save-state-failed { background: #ffe9e2; color: #8a2d13; }
+.save-retry { margin-left: auto; padding: 7px 14px; border: 0; border-radius: 999px; background: #8a2d13; color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; }
+.save-retry:disabled { opacity: .6; cursor: default; }
+.pace-caveat { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
+.metric.metric-unreliable strong { color: #98a1b8; }
+/* A gap in the record a teacher can see. */
+.unrecorded-attempts { border-left: 5px solid #e4703f; }
+.unrecorded-attempt { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid #eef0f6; font-size: 13px; }
+.unrecorded-attempt b { display: block; }
+.unrecorded-attempt span { color: #596382; font-size: 12px; }
+.unrecorded-attempt button { margin-left: auto; padding: 7px 13px; border: 1px solid #d6dbe8; border-radius: 999px; background: #fff; font-weight: 800; font-size: 12px; cursor: pointer; }

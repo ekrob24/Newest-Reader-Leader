@@ -70,6 +70,37 @@ function resolutionFor(intervention: StoredIntervention | undefined): WordResolu
   return "unreviewed";
 }
 
+/**
+ * Which word row each intervention belongs to, by word event id.
+ *
+ * Interventions are keyed by word text rather than by id, so a passage that repeats a word
+ * has to consume them in order. That matching rule lives here once, because two callers need
+ * it and they must not disagree: the row builder at save time, and the teacher override,
+ * which has to move the same row's resolution. If they matched differently, a teacher's
+ * decision would land on a different word from the one they decided about.
+ */
+export function interventionsByWordEventId(wordStates: StoredWordState[], interventions: StoredIntervention[]): Map<string, StoredIntervention> {
+  const pending = new Map<string, StoredIntervention[]>();
+  for (const intervention of interventions) {
+    const key = intervention.word.toLowerCase();
+    const list = pending.get(key) ?? [];
+    list.push(intervention);
+    pending.set(key, list);
+  }
+  const matched = new Map<string, StoredIntervention>();
+  for (const state of wordStates) {
+    const intervention = pending.get(state.text.toLowerCase())?.shift();
+    if (intervention) matched.set(state.id, intervention);
+  }
+  return matched;
+}
+
+/** The resolution each word row should carry, given the interventions as they stand now. */
+export function resolutionsByWordEventId(wordStates: StoredWordState[], interventions: StoredIntervention[]): Map<string, WordResolution> {
+  const matched = interventionsByWordEventId(wordStates, interventions);
+  return new Map(wordStates.map(state => [state.id, resolutionFor(matched.get(state.id))]));
+}
+
 export function buildReadingWordRows(input: {
   wordStates: StoredWordState[];
   wordTimings?: StoredWordTiming[] | null;
@@ -79,20 +110,10 @@ export function buildReadingWordRows(input: {
 }): ReadingWordRow[] {
   const timingById = new Map((input.wordTimings ?? []).map(timing => [timing.id, timing]));
 
-  // Interventions are keyed by word text, not by word id, so a passage repeating a word has
-  // to consume its interventions in order. Matching by id would be better and needs the
-  // analysis layer to carry one; until then this is the honest reading of the JSON.
-  const pending = new Map<string, StoredIntervention[]>();
-  for (const intervention of input.interventions) {
-    const key = intervention.word.toLowerCase();
-    const list = pending.get(key) ?? [];
-    list.push(intervention);
-    pending.set(key, list);
-  }
-  const takeIntervention = (word: string) => pending.get(word.toLowerCase())?.shift();
+  const matched = interventionsByWordEventId(input.wordStates, input.interventions);
 
   return input.wordStates.map((state, tokenIndex) => {
-    const intervention = takeIntervention(state.text);
+    const intervention = matched.get(state.id);
     const timing = timingById.get(state.id);
     return {
       wordEventId: state.id,

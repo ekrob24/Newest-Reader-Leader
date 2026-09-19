@@ -116,3 +116,4 @@ client/public/__manus__/version.json
 # Playwright
 test-results/
 playwright-report/
+demo-recording/

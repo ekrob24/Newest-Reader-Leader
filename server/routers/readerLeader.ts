@@ -65,6 +65,7 @@ import {
   seedDemoCohort,
   recordUnrecordedReadingAttempt,
   acknowledgeUnrecordedReadingAttempt,
+  getSettledAccuracy,
   saveReadingSession,
   saveLearnerReadingSettings,
   saveWeeklyReadingGoal,
@@ -330,7 +331,9 @@ export const readerLeaderRouter = router({
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, review.session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
-      return review;
+      // Derived from the per-word rows on every read, never stored, so it cannot drift from
+      // the decisions a teacher has actually made.
+      return { ...review, settled: await getSettledAccuracy(tenantScope(ctx), input.sessionId) };
     }),
     decideIntervention: protectedProcedure.input(z.object({ sessionId: sessionIdInput, interventionIndex: z.number().int().min(0).max(100), teacherDecision: z.enum(["confirmed", "overridden"]) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);

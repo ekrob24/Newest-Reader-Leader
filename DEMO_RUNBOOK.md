@@ -40,6 +40,15 @@ storage is likewise unconfigured, so the report says no recording was saved.
    for a decision.
 9. **Confirm the match.** The queue reflects the teacher's decision on screen.
 
+## The teacher decision, and the number that follows it
+
+Reachable at **Review word by word** on any saved reading. The screen shows two figures: the
+story match as the model scored it, and the accuracy after the teacher's decisions. The second
+starts at 100% however many words the model flagged, because an unchecked machine judgement
+does not enter a child's record. Confirming a miscue is what lets it count; overriding takes
+it back out. An Irish English variation is a separate category and never counts, confirmed or
+not.
+
 ## What happens when a reading cannot be saved
 
 Worth showing deliberately, because it is the part most demos hide. If the save is
@@ -58,11 +67,25 @@ Two related honesty notes visible in the demo:
   child's report or the teacher's running record. The accent showcase is four seconds
   long, so it demonstrates this.
 
+## The recorded walkthrough
+
+`pnpm demo:record` runs the same browser journey with video and a trace turned on, and writes
+`demo-recording/reader-leader-walkthrough.webm` plus one PNG per moment in
+`demo-recording/frames/`. It is about 45 seconds at 1280x800 and roughly 4 MB, small enough to
+attach to an email. Nothing is staged: it is the real application doing the journey the test
+asserts, so a recording can only exist if the journey passes.
+
+Two things it needs:
+
+- **A database with no teacher decisions on the seeded record.** Decisions persist, and the
+  journey asserts both flagged moments start undecided, so run it against a fresh database.
+  The assertion says so by name if you forget.
+- `READER_LEADER_RECORD=1`, which `pnpm demo:record` sets. Video, the trace and the pauses are
+  off in every other run, so CI neither films itself nor uploads a video.
+
 ## What the demo does not show
 
-- `TeacherSessionReviewScreen` exists in the codebase but is not routed, so the per-word
-  confirm/override screen is unreachable. The teacher decision in the journey is the
-  *Pending speech matches* confirmation, which is the reachable one.
+- Live audio playback, unless object storage is configured. Everything else works without it.
 - Live speech recognition is the browser's own Web Speech API. It works in Chrome against
   Google's service; it does not work in a bare Chromium, which is why the browser test
   substitutes it (see the spec's header comment).

@@ -43,7 +43,8 @@ import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistD
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
 import { newSessionId } from "../shared/sessionId";
 import { resolveCaptureTime } from "../shared/captureTime";
-import { buildReadingWordRows, type ReadingWordProvenance } from "../shared/readingWordRows";
+import { buildReadingWordRows, resolutionsByWordEventId, type ReadingWordProvenance } from "../shared/readingWordRows";
+import { accuracyFromWords, countsAgainstScore } from "../shared/readingWordScore";
 
 /**
  * The engine and policy behind a word judgement. `provider` names the alignment engine, not
@@ -622,9 +623,27 @@ export async function saveTeacherInterventionDecision(scope: TenantScope, sessio
   if (!intervention) throw new Error("Reading moment not found.");
   const interventions = session.interventions.map((item, index) => index === interventionIndex ? { ...item, teacherDecision } : item);
   await db.update(readingSessions).set({ interventions }).where(eq(readingSessions.id, sessionId));
+
+  // The decision has to reach the per-word rows, because that is what the derived score reads.
+  // Updating only the JSON is how an override and the number on screen drift apart: the
+  // teacher overrules the machine, the row keeps saying teacher_confirmed, and the accuracy
+  // a parent sees still reflects a judgement a human rejected.
+  const resolutions = resolutionsByWordEventId(session.wordStates ?? [], interventions);
+  for (const [wordEventId, resolution] of Array.from(resolutions)) {
+    await db.update(readingWords).set({ resolution }).where(and(eq(readingWords.sessionId, sessionId), eq(readingWords.wordEventId, wordEventId)));
+  }
+
   const [updated] = await db.select().from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
   if (!updated) throw new Error("Could not save the teacher decision.");
   return updated;
+}
+
+/** The accuracy a teacher's decisions actually support, derived from the per-word rows and
+ *  never stored. Null when the session predates per-word rows. */
+export async function getSettledAccuracy(scope: TenantScope, sessionId: string) {
+  const db = await scopedDb(scope);
+  const words = await db.select({ judgement: readingWords.judgement, resolution: readingWords.resolution }).from(readingWords).where(eq(readingWords.sessionId, sessionId));
+  return { wordCount: words.length, accuracy: accuracyFromWords(words), countedAgainst: words.filter(countsAgainstScore).length };
 }
 
 export async function getAssignedMaterialForChild(scope: TenantScope, childUserId: number, materialId: number) {
@@ -956,13 +975,21 @@ export async function provisionLocalDemoCohort() {
   await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, material.id));
   await db.insert(materialAssignments).values({ classId: readerClass.id, materialId: material.id }).onDuplicateKeyUpdate({ set: { materialId: material.id } });
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, profile.id)).limit(1);
-  if (!existingSession) await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", completed: 1, wordTimings: [], ...demoReading({
+  // Through saveReadingSession, not a raw insert: that is what writes the per-word rows the
+  // derived score reads. A seeded reading that skips them has no settled accuracy at all, so
+  // the teacher review screen shows a dash where the product shows a number — demo data that
+  // is a different shape from real data is a demo that proves less than it appears to.
+  if (!existingSession) await saveReadingSession({ schoolId: seeded.id }, { childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden · last week", ...demoReading({
     // The passage the learner was actually assigned, read at a believable pace for the level.
     expectedText: material.sourceText,
-    transcript: 'Amina carried a little lantern into the garden at dusk. The light made golden circles on the path. Near the tall gate, she saw a hedghog sniffing beside the flowers. Amina stood very still, then watched it hurry safely under the hedge.',
+    // Two flagged moments of different kinds on purpose, because the difference between them
+    // is the fairness claim: "de" for "the" is TH-stopping, a correct reading in the child's
+    // dialect that never counts against them; "hedghog" for "hedgehog" is a real substitution,
+    // which counts only once a teacher confirms it.
+    transcript: 'Amina carried a little lantern into de garden at dusk. The light made golden circles on the path. Near the tall gate, she saw a hedghog sniffing beside the flowers. Amina stood very still, then watched it hurry safely under the hedge.',
     durationSeconds: 27,
     languageSupport: "IRISH_ENGLISH_SUPPORT",
-  }) });
+  }), languageSupport: "IRISH_ENGLISH_SUPPORT" });
   const accentShowcaseTitle = "Accent Showcase — The Thin Path";
   const [accentShowcaseSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, accentShowcaseTitle))).limit(1);
   if (!accentShowcaseSeed) {

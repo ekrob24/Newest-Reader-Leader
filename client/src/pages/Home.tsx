@@ -9,7 +9,7 @@ import { ParentDashboard } from "@/components/ParentDashboard";
 import { trpc } from "@/lib/trpc";
 import type { MaterialRightsSource } from "../../../drizzle/schema";
 import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead, type LiveWordState } from "@shared/liveWordStates";
-import { hasChildReadingEvidence } from "@shared/readingEvidence";
+import { hasChildReadingEvidence, readingCapture, readingCaptureMessage } from "@shared/readingEvidence";
 import { installOnDeviceSpeech, onDeviceAvailability, sendsVoiceOffDevice, speechModeNotice, type SpeechMode } from "@shared/onDeviceSpeech";
 import { SAVE_PENDING, childSaveMessage, isSaved, type SaveOutcome } from "@shared/saveOutcome";
 import { isPaceMeaningful, shortSampleNote } from "@shared/readingPace";
@@ -99,6 +99,7 @@ export default function Home() {
   const [micTrouble, setMicTrouble] = useState(false);
   /** What the recogniser is currently guessing, before it settles. Shown, never scored. */
   const [interimTranscript, setInterimTranscript] = useState("");
+  const interimTranscriptRef = useRef("");
   /** Where this browser processes the child's voice. Shown, never assumed. */
   const [speechMode, setSpeechMode] = useState<SpeechMode>("cloud");
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -355,11 +356,32 @@ export default function Home() {
     if (!playSpeech(text, () => setModelSpeaking(true), () => setModelSpeaking(false))) setModelSpeaking(false);
   }
   function cleanupRecording() { recognitionDesiredRef.current = false; if (restartTimerRef.current !== null) { window.clearTimeout(restartTimerRef.current); restartTimerRef.current = null; } recognitionFailuresRef.current = 0; recognitionRef.current?.stop?.(); recognitionRef.current = null; if (transcriptFrameRef.current !== null) window.cancelAnimationFrame(transcriptFrameRef.current); transcriptFrameRef.current = null; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; recorderRef.current = null; }
-  function hasReadingEvidence() { return hasChildReadingEvidence(liveTranscriptRef.current, wordStates); }
+  /**
+   * Everything the child has said, settled or not.
+   *
+   * Word states are derived from finalised speech only, so the highlighting cannot flicker.
+   * The saved record must not be that strict: a recogniser that is stopped — which every
+   * restart does, and finishing does — discards whatever it had not settled yet, and that
+   * speech was still spoken. Dropping it produced a saved reading with no transcript at all,
+   * scored 0%.
+   */
+  function spokenTranscript() {
+    return `${liveTranscriptRef.current} ${interimTranscriptRef.current}`.replace(/\s+/g, " ").trim();
+  }
+  /** Fold unsettled speech into the record before a recogniser is replaced or stopped. */
+  function commitInterimSpeech() {
+    if (!interimTranscriptRef.current) return;
+    liveTranscriptRef.current = spokenTranscript();
+    pendingTranscriptRef.current = liveTranscriptRef.current;
+    setLiveTranscript(liveTranscriptRef.current);
+    interimTranscriptRef.current = "";
+    setInterimTranscript("");
+  }
+  function hasReadingEvidence() { return hasChildReadingEvidence(spokenTranscript(), wordStates); }
   function finishWithGuidedTranscript({ persist = true }: { persist?: boolean } = {}) {
     if (!hasReadingEvidence()) { setReadingState("ready"); setRecognitionStatus("ready"); toast("Read a little before finishing so Reader Leader can make a helpful report."); return; }
     const elapsed = startedAtRef.current > 0 ? Math.max(1, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000)) : 1;
-    finishWithReport(createGuidedReport(selectedStory, liveTranscriptRef.current.trim(), elapsed, assessmentMode, wordStates), persist);
+    finishWithReport(createGuidedReport(selectedStory, spokenTranscript(), elapsed, assessmentMode, wordStates), persist);
   }
   async function sendRecording(blob: Blob) {
     // Report the reading time that actually elapsed. This used to be raised to twenty
@@ -372,7 +394,7 @@ export default function Home() {
       toast(blob.size === 0 ? "No sound reached the microphone, so your words were saved from the live transcript." : "That recording was too long to send, so your words were saved from the live transcript.");
       return finishWithGuidedTranscript();
     }
-    try { const payload = { audioBase64: arrayBufferToBase64(await blob.arrayBuffer()), audioMime: blob.type || "audio/webm", expectedText: selectedStory.text, durationSeconds: elapsed, fallbackTranscript: liveTranscriptRef.current.trim() }; if (childProfile?.id) processAndSave.mutate({ ...payload, childProfileId: childProfile.id, materialId: selectedStory.materialId, storyTitle: selectedStory.title, assessmentMode, wordStates }); else processRecording.mutate(payload); } catch { finishWithGuidedTranscript(); }
+    try { const payload = { audioBase64: arrayBufferToBase64(await blob.arrayBuffer()), audioMime: blob.type || "audio/webm", expectedText: selectedStory.text, durationSeconds: elapsed, fallbackTranscript: spokenTranscript() }; if (childProfile?.id) processAndSave.mutate({ ...payload, childProfileId: childProfile.id, materialId: selectedStory.materialId, storyTitle: selectedStory.title, assessmentMode, wordStates }); else processRecording.mutate(payload); } catch { finishWithGuidedTranscript(); }
   }
   /**
    * Own exactly one recogniser at a time.
@@ -397,6 +419,8 @@ export default function Home() {
 
     const previous = recognitionRef.current;
     if (previous) {
+      // Stopping discards anything not yet settled, so keep it first.
+      commitInterimSpeech();
       previous.onresult = null; previous.onerror = null; previous.onend = null; previous.onstart = null;
       try { previous.abort?.(); } catch { /* already gone */ }
     }
@@ -431,6 +455,7 @@ export default function Home() {
         if (result.isFinal) finalText += `${result[0].transcript} `;
         else interimText += `${result[0].transcript} `;
       }
+      interimTranscriptRef.current = interimText.trim();
       setInterimTranscript(interimText.trim());
       if (!finalText.trim()) {
         // Still mid-phrase: the child is being heard, but nothing is settled to score yet.
@@ -615,7 +640,10 @@ function ReportView({ story, report, sessionId, hasRecording = Boolean(report.ha
   const reportHeading = report.correctWords > 0 && report.accuracy >= 60 ? "Great reading!" : "You finished your reading";
   const saved = isSaved(saveOutcome);
   const paceNote = report.paceReliable === false ? shortSampleNote(report.durationSeconds) : null;
-  return <div className="report-wrap"><section className="report-hero"><div className="report-burst"><div className="star-badge"><Star size={44} fill="#f4c746" /></div><h1>{monthly ? "Monthly reading check complete" : "That was a brave read!"}</h1></div><div className="report-main"><div className="kicker">{monthly ? "Monthly Assessment" : "Reading Report"} · {story.title}</div><h2>{monthly ? "You finished your monthly reading check." : reportHeading}</h2><p>{report.childMessage}</p><div className="metric-row"><div className="metric"><strong>{monthly ? report.firstPassAccuracy : report.accuracy}%</strong><span>{monthly ? "First-pass match*" : "Story match*"}</span></div><div className={`metric ${paceNote ? "metric-unreliable" : ""}`}><strong>{paceNote ? "—" : report.pace}</strong><span>{monthly ? "First-pass WCPM*" : "WCPM*"}</span></div><div className="metric"><strong>{monthly ? "Quiet" : report.selfCorrections.length}</strong><span>{monthly ? "Coach feedback" : "Self-corrections"}</span></div></div><div className="report-actions">{monthly ? <button className="primary-cta" onClick={onLibrary}><BookOpen size={17} /> Back to Reading Library</button> : <button className="primary-cta" onClick={onReadAgain}><RotateCcw size={17} /> Read it again</button>}<button className="secondary-cta" onClick={onLibrary}><BookOpen size={17} /> {monthly ? "Choose a story" : "New story"}</button>{story.materialId && <button className="quiz-start" onClick={onQuiz}><Sparkles size={17} /> Quick quiz</button>}</div>{childProfileId && <div className="report-tools"><ReportDownloadButton childProfileId={childProfileId} audience="child" label="Download my celebration" />{sessionId && hasRecording ? <SessionAudioButton sessionId={sessionId} label="Play my recording" /> : <span className="recording-status">No recording was saved for this reading.</span>}</div>}<div className={`save-state save-state-${saveOutcome.status}`} role="status" data-testid="save-state" data-save-status={saveOutcome.status}>{saved ? <Check size={15} /> : saveOutcome.status === "pending" ? <RotateCcw size={15} /> : <AlertCircle size={15} />}<span>{childSaveMessage(saveOutcome)}</span>{saveOutcome.status === "failed" && onRetrySave ? <button type="button" className="save-retry" onClick={onRetrySave} disabled={retrying}>{retrying ? "Trying…" : "Try again"}</button> : null}</div>{paceNote ? <p className="pace-caveat" data-testid="pace-caveat">{paceNote}</p> : null}</div></section><section className="report-details">{monthly ? <article className="detail-card monthly-card"><h3>Monthly Assessment</h3><p>This was a first-pass reading check. Reader Leader did not show red words, ask for retries, or interrupt your reading.</p><div className="prototype-note">Your teacher can review any quiet reading notes alongside your work and choose the next best step with you.</div></article> : <><article className="detail-card"><h3>Self-Corrections & Retries</h3>{hasRetries ? <div className="practice-list">{report.retrySummary.map(item => <div className="practice-item" key={item.word}><strong>{item.word}</strong><span>{item.retries} {item.retries === 1 ? "retry" : "retries"}{report.selfCorrections.includes(item.word) ? " · corrected" : ""}</span></div>)}</div> : <p className="calm-note">No extra retries were needed in this session. Keep using the same calm, steady pace.</p>}<div className="prototype-note">{report.nextStep}</div></article><article className="detail-card word-activity-card"><h3>Tricky words to practise</h3><p>These words are saved from your reading. Listen, say the word, then take it back into the story.</p><div className="word-activity-list">{(report.practiceWords.length ? report.practiceWords : ["smooth phrasing"]).map((word, index) => <div className="word-activity" key={word}><span>{index + 1}</span><div><strong>{word}</strong><small>{practisedWords.has(word) ? "Practised—now try it in the story sentence." : "Listen first, say it aloud, then tell us you had a go."}</small></div><button type="button" onClick={() => playSpeech(word, () => setPracticeMessage(`Listen for the sounds in “${word}”, then say it in your own voice.`))}><Volume2 size={14} /> Hear</button><button type="button" className={practisedWords.has(word) ? "done" : ""} onClick={() => markPractised(word)}>{practisedWords.has(word) ? <><Check size={14} /> Practised</> : "I said it"}</button></div>)}</div>{practiceMessage && <p className="word-practice-message" role="status">{practiceMessage}</p>}</article></>}<article className="detail-card"><h3>{monthly ? "Teacher review note" : "Listen back"}</h3>{monthly ? <p className="calm-note">Your teacher will use the saved first-pass match and WCPM as one helpful piece of your reading picture.</p> : <><p className="calm-note">Hear your own brave reading, then choose one word activity above.</p>{sessionId && hasRecording ? <SessionAudioButton sessionId={sessionId} label="Listen to my reading" /> : <p className="prototype-note">A recording appears here only when this reading was captured successfully.</p>}</>}<div className="prototype-note">Numbers are practice signals, not a reading diagnosis.</div></article></section></div>;
+  // A reading nothing was heard in is not a poor reading. Say which one happened.
+  const capture = readingCapture(report.correctWords, report.transcript.trim() ? report.transcript.trim().split(/\s+/).length : 0);
+  const captureMessage = readingCaptureMessage(capture);
+  return <div className="report-wrap"><section className="report-hero"><div className="report-burst"><div className="star-badge"><Star size={44} fill="#f4c746" /></div><h1>{monthly ? "Monthly reading check complete" : "That was a brave read!"}</h1></div><div className="report-main"><div className="kicker">{monthly ? "Monthly Assessment" : "Reading Report"} · {story.title}</div><h2>{captureMessage ? "Let\u2019s try that one again" : monthly ? "You finished your monthly reading check." : reportHeading}</h2><p>{captureMessage ?? report.childMessage}</p><div className="metric-row"><div className={`metric ${captureMessage ? "metric-unreliable" : ""}`}><strong>{captureMessage ? "\u2014" : `${monthly ? report.firstPassAccuracy : report.accuracy}%`}</strong><span>{monthly ? "First-pass match*" : "Story match*"}</span></div><div className={`metric ${paceNote || captureMessage ? "metric-unreliable" : ""}`}><strong>{paceNote || captureMessage ? "—" : report.pace}</strong><span>{monthly ? "First-pass WCPM*" : "WCPM*"}</span></div><div className="metric"><strong>{monthly ? "Quiet" : report.selfCorrections.length}</strong><span>{monthly ? "Coach feedback" : "Self-corrections"}</span></div></div><div className="report-actions">{monthly ? <button className="primary-cta" onClick={onLibrary}><BookOpen size={17} /> Back to Reading Library</button> : <button className="primary-cta" onClick={onReadAgain}><RotateCcw size={17} /> Read it again</button>}<button className="secondary-cta" onClick={onLibrary}><BookOpen size={17} /> {monthly ? "Choose a story" : "New story"}</button>{story.materialId && <button className="quiz-start" onClick={onQuiz}><Sparkles size={17} /> Quick quiz</button>}</div>{childProfileId && <div className="report-tools"><ReportDownloadButton childProfileId={childProfileId} audience="child" label="Download my celebration" />{sessionId && hasRecording ? <SessionAudioButton sessionId={sessionId} label="Play my recording" /> : <span className="recording-status">No recording was saved for this reading.</span>}</div>}<div className={`save-state save-state-${saveOutcome.status}`} role="status" data-testid="save-state" data-save-status={saveOutcome.status}>{saved ? <Check size={15} /> : saveOutcome.status === "pending" ? <RotateCcw size={15} /> : <AlertCircle size={15} />}<span>{childSaveMessage(saveOutcome)}</span>{saveOutcome.status === "failed" && onRetrySave ? <button type="button" className="save-retry" onClick={onRetrySave} disabled={retrying}>{retrying ? "Trying…" : "Try again"}</button> : null}</div>{paceNote ? <p className="pace-caveat" data-testid="pace-caveat">{paceNote}</p> : null}</div></section><section className="report-details">{monthly ? <article className="detail-card monthly-card"><h3>Monthly Assessment</h3><p>This was a first-pass reading check. Reader Leader did not show red words, ask for retries, or interrupt your reading.</p><div className="prototype-note">Your teacher can review any quiet reading notes alongside your work and choose the next best step with you.</div></article> : <><article className="detail-card"><h3>Self-Corrections & Retries</h3>{hasRetries ? <div className="practice-list">{report.retrySummary.map(item => <div className="practice-item" key={item.word}><strong>{item.word}</strong><span>{item.retries} {item.retries === 1 ? "retry" : "retries"}{report.selfCorrections.includes(item.word) ? " · corrected" : ""}</span></div>)}</div> : <p className="calm-note">No extra retries were needed in this session. Keep using the same calm, steady pace.</p>}<div className="prototype-note">{report.nextStep}</div></article><article className="detail-card word-activity-card"><h3>Tricky words to practise</h3><p>These words are saved from your reading. Listen, say the word, then take it back into the story.</p><div className="word-activity-list">{(report.practiceWords.length ? report.practiceWords : ["smooth phrasing"]).map((word, index) => <div className="word-activity" key={word}><span>{index + 1}</span><div><strong>{word}</strong><small>{practisedWords.has(word) ? "Practised—now try it in the story sentence." : "Listen first, say it aloud, then tell us you had a go."}</small></div><button type="button" onClick={() => playSpeech(word, () => setPracticeMessage(`Listen for the sounds in “${word}”, then say it in your own voice.`))}><Volume2 size={14} /> Hear</button><button type="button" className={practisedWords.has(word) ? "done" : ""} onClick={() => markPractised(word)}>{practisedWords.has(word) ? <><Check size={14} /> Practised</> : "I said it"}</button></div>)}</div>{practiceMessage && <p className="word-practice-message" role="status">{practiceMessage}</p>}</article></>}<article className="detail-card"><h3>{monthly ? "Teacher review note" : "Listen back"}</h3>{monthly ? <p className="calm-note">Your teacher will use the saved first-pass match and WCPM as one helpful piece of your reading picture.</p> : <><p className="calm-note">Hear your own brave reading, then choose one word activity above.</p>{sessionId && hasRecording ? <SessionAudioButton sessionId={sessionId} label="Listen to my reading" /> : <p className="prototype-note">A recording appears here only when this reading was captured successfully.</p>}</>}<div className="prototype-note">Numbers are practice signals, not a reading diagnosis.</div></article></section></div>;
 }
 
 function QuizView({ childProfileId, materialId, onDone }: { childProfileId: number; materialId: number; onDone: () => void }) {

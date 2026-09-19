@@ -75,8 +75,18 @@ pnpm install --frozen-lockfile
 
 Write-Host "Preparing the database..." -ForegroundColor Cyan
 pnpm seed:preview
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "(database already seeded, or MySQL refused the login - continuing)"
+# Exit code 3 means the database was already seeded, which is fine. Anything else is a real
+# failure and must stop here: carrying on builds and starts the app against a database with
+# no tables in it, and the first thing you see is a query error at the login screen.
+if ($LASTEXITCODE -eq 3) {
+  Write-Host "(already seeded - continuing)"
+} elseif ($LASTEXITCODE -ne 0) {
+  Write-Host ""
+  Write-Host "Preparing the database failed. Not starting the app." -ForegroundColor Red
+  Write-Host "The message above this line says why. The usual cause is the MySQL root password:"
+  Write-Host "re-run with the one you set, for example"
+  Write-Host ('  powershell -ExecutionPolicy Bypass -File ' + '.' + [char]92 + 'scripts' + [char]92 + 'run-local.ps1 -MysqlPassword "yourpassword"')
+  exit 1
 }
 
 Write-Host "Building..." -ForegroundColor Cyan

@@ -30,7 +30,20 @@ echo "Installing dependencies…"
 pnpm install --frozen-lockfile
 
 echo "Preparing the database…"
-pnpm seed:preview || echo "(database already seeded — continuing)"
+# Exit code 3 means already seeded, which is fine. Anything else is a real failure and has to
+# stop here: carrying on starts the app against a database with no tables in it.
+set +e
+pnpm seed:preview
+seed_status=$?
+set -e
+if [ "$seed_status" -eq 3 ]; then
+  echo "(already seeded — continuing)"
+elif [ "$seed_status" -ne 0 ]; then
+  echo
+  echo "Preparing the database failed. Not starting the app."
+  echo "The message above says why; the usual cause is the MySQL root password."
+  exit 1
+fi
 
 echo "Building…"
 pnpm build

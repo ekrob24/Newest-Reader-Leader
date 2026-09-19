@@ -21,9 +21,18 @@ if (!url) {
 
 const force = process.argv.includes("--force");
 
+/** Exit code meaning "nothing to do", as distinct from any failure. */
+const ALREADY_SEEDED = 3;
+
 async function main() {
   // The database itself may not exist yet on a fresh machine; drizzle-kit needs it to.
-  execFileSync("node", ["scripts/ensure-database.mjs"], { stdio: "inherit" });
+  try {
+    execFileSync("node", ["scripts/ensure-database.mjs"], { stdio: "inherit" });
+  } catch {
+    // ensure-database has already printed something a person can act on. Re-throwing its
+    // stack on top would bury that under forty lines of node internals.
+    process.exit(1);
+  }
 
   const connection = await mysql.createConnection(url);
   try {
@@ -32,9 +41,11 @@ async function main() {
       const [rows] = await connection.query("SELECT COUNT(*) AS total FROM readingSessions");
       const total = Number(rows[0].total);
       if (total > 0 && !force) {
-        console.error(`This database already holds ${total} reading session(s).`);
-        console.error("Refusing to seed it. Create an empty database for the preview, or pass --force if you are certain.");
-        process.exit(1);
+        console.log(`This database already holds ${total} reading session(s) — leaving it alone.`);
+        console.log("Pass --force to reseed it, or point DATABASE_URL at an empty database.");
+        // A distinct code, so a caller can tell "already done" from "went wrong". Exiting 1
+        // for both is how a runner ends up treating a real failure as nothing to worry about.
+        process.exit(ALREADY_SEEDED);
       }
     }
   } finally {

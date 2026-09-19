@@ -746,3 +746,10 @@ select:focus,
 /* A teacher works down the flagged moments while the figure they are changing sits above
    them. Sticky so the consequence of a decision stays on screen at the moment it is made. */
 .session-review-page .record-metrics { position: sticky; top: 0; z-index: 6; background: #fff; box-shadow: 0 6px 16px -12px rgba(20, 30, 60, .45); }
+
+/* Stated on every screen, in the document flow so it can never cover a control. */
+.synthetic-data-notice { display: flex; align-items: flex-start; gap: 9px; padding: 9px 18px; background: #1d2540; color: #e8eeff; font-size: 12px; line-height: 1.5; }
+.synthetic-data-notice svg { flex: none; margin-top: 2px; color: #ffd46b; }
+.synthetic-data-notice p { margin: 0; }
+.synthetic-data-notice strong { color: #fff; }
+@media (max-width: 640px) { .synthetic-data-notice { padding: 9px 14px; font-size: 11px; } }

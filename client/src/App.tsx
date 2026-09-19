@@ -6,6 +6,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import { TeacherSessionReviewScreen } from "./components/TeacherSessionReview";
 import NotFound from "./pages/NotFound";
+import { SyntheticDataNotice } from "./components/SyntheticDataNotice";
 
 /** The per-word confirm and override surface. It existed in the codebase with no route, so
  *  the teacher decision the product is built around could not be reached in the running app. */
@@ -33,6 +34,7 @@ export default function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
+          <SyntheticDataNotice />
           <Router />
         </TooltipProvider>
       </ThemeProvider>

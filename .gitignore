@@ -117,3 +117,6 @@ client/public/__manus__/version.json
 test-results/
 playwright-report/
 demo-recording/
+
+# Generated preview credentials. Never committed — see DEPLOY_PREVIEW.md.
+preview-secrets.local.txt

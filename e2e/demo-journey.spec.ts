@@ -95,6 +95,9 @@ test("the demo journey", async ({ page, context }) => {
   await expect(page.getByRole("button", { name: /Continue as Child/i })).toBeVisible();
 
   // 2. Sign in as the child.
+  // The synthetic-data statement is on screen before anyone signs in, and stays on every
+  // screen after. A viewer is told without having to ask.
+  await expect(page.getByTestId("synthetic-data-notice")).toContainText(/everything here is synthetic/i);
   await beat(page, "01-landing");
   await page.getByRole("button", { name: /Continue as Child/i }).click();
   await page.locator("input[type=password]").fill(CHILD_PASSWORD);
@@ -205,4 +208,5 @@ test("the demo journey", async ({ page, context }) => {
   //    unrecorded-reading list — the surface that exists so a failed save is visible to
   //    someone rather than to no one.
   await expect(page.getByTestId("unrecorded-attempts")).toHaveCount(0);
+  await expect(page.getByTestId("synthetic-data-notice")).toBeVisible();
 });

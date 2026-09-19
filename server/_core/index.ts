@@ -8,6 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { registerPreviewHardening } from "../previewHardening";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -34,6 +35,9 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Before every route, including the API and the static client: a redirect that has not
+  // happened yet cannot protect the request that is already being served.
+  registerPreviewHardening(app);
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API

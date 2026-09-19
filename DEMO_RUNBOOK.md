@@ -83,6 +83,11 @@ Two things it needs:
 - `READER_LEADER_RECORD=1`, which `pnpm demo:record` sets. Video, the trace and the pauses are
   off in every other run, so CI neither films itself nor uploads a video.
 
+## Deploying it somewhere people can click
+
+See `DEPLOY_PREVIEW.md`. It is a dashboard checklist, not a code change: region, database,
+variables, seeding, app sleeping, and four one-line checks against the live URL.
+
 ## What the demo does not show
 
 - Live audio playback, unless object storage is configured. Everything else works without it.

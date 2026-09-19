@@ -1,0 +1,37 @@
+CREATE TABLE `readingWords` (
+	`id` varchar(26) NOT NULL,
+	`schoolId` int NOT NULL,
+	`sessionId` varchar(26) NOT NULL,
+	`wordEventId` varchar(64) NOT NULL,
+	`tokenIndex` int NOT NULL,
+	`referenceWord` varchar(120) NOT NULL,
+	`heardWord` varchar(120),
+	`progress` enum('unread','current','correct','incorrect','retried_correct') NOT NULL,
+	`judgement` enum('correct','substitution','omission','insertion','repetition','self_correction','hesitation','uncertain') NOT NULL,
+	`resolution` enum('auto','teacher_confirmed','teacher_overridden','unreviewed') NOT NULL DEFAULT 'unreviewed',
+	`audioConfidence` decimal(4,3),
+	`alignmentConfidence` decimal(4,3),
+	`lexicalConfidence` decimal(4,3),
+	`pronunciationConfidence` decimal(4,3),
+	`pronunciationContext` enum('valid_regional_variant','not_matched','uncertain') NOT NULL DEFAULT 'uncertain',
+	`attempts` int NOT NULL DEFAULT 0,
+	`startMs` int,
+	`endMs` int,
+	`dialectFeature` varchar(80),
+	`source` varchar(40) NOT NULL DEFAULT 'built_in',
+	`provider` varchar(80) NOT NULL,
+	`providerVersion` varchar(80) NOT NULL,
+	`policyVersion` varchar(80) NOT NULL,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `readingWords_id` PRIMARY KEY(`id`),
+	CONSTRAINT `reading_word_event_unique` UNIQUE(`sessionId`,`wordEventId`),
+	CONSTRAINT `reading_word_token_unique` UNIQUE(`sessionId`,`tokenIndex`),
+	CONSTRAINT `reading_word_audio_confidence_range` CHECK(`readingWords`.`audioConfidence` is null or `readingWords`.`audioConfidence` between 0 and 1),
+	CONSTRAINT `reading_word_alignment_confidence_range` CHECK(`readingWords`.`alignmentConfidence` is null or `readingWords`.`alignmentConfidence` between 0 and 1),
+	CONSTRAINT `reading_word_lexical_confidence_range` CHECK(`readingWords`.`lexicalConfidence` is null or `readingWords`.`lexicalConfidence` between 0 and 1),
+	CONSTRAINT `reading_word_pronunciation_confidence_range` CHECK(`readingWords`.`pronunciationConfidence` is null or `readingWords`.`pronunciationConfidence` between 0 and 1),
+	CONSTRAINT `reading_word_token_index_range` CHECK(`readingWords`.`tokenIndex` >= 0)
+);
+--> statement-breakpoint
+ALTER TABLE `readingWords` ADD CONSTRAINT `readingWords_schoolId_schools_id_fk` FOREIGN KEY (`schoolId`) REFERENCES `schools`(`id`) ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `readingWords` ADD CONSTRAINT `readingWords_sessionId_readingSessions_id_fk` FOREIGN KEY (`sessionId`) REFERENCES `readingSessions`(`id`) ON DELETE cascade ON UPDATE no action;

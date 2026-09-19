@@ -15,6 +15,7 @@ import {
   readingMaterialDetails,
   readingMaterials,
   readingSessions,
+  readingWords,
   quizAttempts,
   schoolBranding,
   schools,
@@ -39,6 +40,18 @@ import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistD
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
 import { newSessionId } from "../shared/sessionId";
 import { resolveCaptureTime } from "../shared/captureTime";
+import { buildReadingWordRows, type ReadingWordProvenance } from "../shared/readingWordRows";
+
+/**
+ * The engine and policy behind a word judgement. `provider` names the alignment engine, not
+ * the transcription service: which provider transcribes the audio is a separate, pending
+ * decision and must not be baked into per-word provenance.
+ */
+export const DEFAULT_WORD_PROVENANCE: ReadingWordProvenance = {
+  provider: "reader-leader-aligner",
+  providerVersion: "1.0.0",
+  policyVersion: "2026-09-19",
+};
 import { analyseReadingText } from "./reader";
 
 export type AuthenticatedReader = { id: number; role: AccountRole };
@@ -437,14 +450,26 @@ export async function saveReadingSession(scope: TenantScope, input: {
   wordTimings?: StoredWordTiming[];
   /** The capturing device's own clock. Reconciled against the server's, never trusted blindly. */
   capturedAt?: Date | null;
+  /** Which engine and policy produced these judgements. Recorded per word. */
+  provenance?: ReadingWordProvenance;
 }) {
   const db = await scopedDb(scope);
-  const { capturedAt, ...session } = input;
+  const { capturedAt, provenance: _provenance, ...session } = input;
   // The session carries its own identity from the moment of capture, so the row can be read
   // back by that id instead of guessing at "the most recent row for this child".
   const id = newSessionId();
   const capture = resolveCaptureTime(capturedAt, new Date());
-  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates: input.wordStates ?? [], wordTimings: input.wordTimings ?? [], completed: 1 });
+  const wordStates = input.wordStates ?? [];
+  const wordTimings = input.wordTimings ?? [];
+  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates, wordTimings, completed: 1 });
+
+  // One row per word, from the same evidence as the JSON columns above. Additive: the JSON
+  // stays the source of truth until everything downstream reads the table.
+  const rows = buildReadingWordRows({ wordStates, wordTimings, interventions: input.interventions, provenance: input.provenance ?? DEFAULT_WORD_PROVENANCE });
+  if (rows.length) {
+    await db.insert(readingWords).values(rows.map(row => ({ ...row, id: newSessionId(), sessionId: id })));
+  }
+
   const [saved] = await db.select().from(readingSessions).where(eq(readingSessions.id, id)).limit(1);
   if (!saved) throw new Error("Could not save reading session.");
   return saved;

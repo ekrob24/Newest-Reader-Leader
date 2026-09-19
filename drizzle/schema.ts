@@ -1,4 +1,5 @@
-import { int, json, mysqlEnum, mysqlTable, text, timestamp, unique, varchar } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import { check, decimal, int, json, mysqlEnum, mysqlTable, text, timestamp, unique, varchar } from "drizzle-orm/mysql-core";
 
 export const accountRoleValues = ["user", "admin", "child", "teacher", "parent"] as const;
 export type AccountRole = (typeof accountRoleValues)[number];
@@ -277,6 +278,87 @@ export const sessionComments = mysqlTable("sessionComments", {
   comment: text("comment").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+
+export const wordProgressValues = ["unread", "current", "correct", "incorrect", "retried_correct"] as const;
+export type WordProgress = (typeof wordProgressValues)[number];
+
+/** Mirrors evidence_bundles.event_type in the governance repo, lowercased for this codebase. */
+export const wordJudgementValues = ["correct", "substitution", "omission", "insertion", "repetition", "self_correction", "hesitation", "uncertain"] as const;
+export type WordJudgement = (typeof wordJudgementValues)[number];
+
+export const wordResolutionValues = ["auto", "teacher_confirmed", "teacher_overridden", "unreviewed"] as const;
+export type WordResolution = (typeof wordResolutionValues)[number];
+
+/** Mirrors evidence_bundles.pronunciation_context. */
+export const pronunciationContextValues = ["valid_regional_variant", "not_matched", "uncertain"] as const;
+export type PronunciationContext = (typeof pronunciationContextValues)[number];
+
+/**
+ * One row per word of reading opportunity, written at session save.
+ *
+ * Three independent state fields, because one column cannot represent an override honestly:
+ * `progress` is what the child did, `judgement` is what the system concluded, `resolution` is
+ * who settled it. Whether a word counts against a score is DERIVED from judgement and
+ * resolution by countsAgainstScore() in shared/readingWordScore.ts — never stored. A stored
+ * flag is how an override and the displayed accuracy drift apart.
+ *
+ * Four confidence scores rather than one blended number: a word flagged because the
+ * microphone was poor and a word flagged because the child misread it are different events,
+ * and telling them apart is the whole fairness argument. Each is null when the pipeline
+ * cannot supply it; none is invented.
+ *
+ * Field names follow evidence_bundles in the reader-leader-tech-ireland governance repo
+ * (Postgres/Supabase) so the two reconcile without a translation layer. Divergences, both
+ * deliberate: `heardWord` is that repo's `observed_form`, kept because the existing JSON
+ * columns and the matcher already use heardWord; and the confidences are nullable here
+ * because this pipeline cannot yet supply them, where that repo requires them.
+ */
+export const readingWords = mysqlTable("readingWords", {
+  id: varchar("id", { length: 26 }).primaryKey(),
+  schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 26 }).notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  /** Stable identifier for this word within its session. */
+  wordEventId: varchar("wordEventId", { length: 64 }).notNull(),
+  /** Position in the passage, from zero. Fixes reading order independently of insertion order. */
+  tokenIndex: int("tokenIndex").notNull(),
+  /** The word the child was meant to read. */
+  referenceWord: varchar("referenceWord", { length: 120 }).notNull(),
+  /** What was heard instead, when that differs. `observed_form` in the governance repo. */
+  heardWord: varchar("heardWord", { length: 120 }),
+
+  progress: mysqlEnum("progress", wordProgressValues).notNull(),
+  judgement: mysqlEnum("judgement", wordJudgementValues).notNull(),
+  resolution: mysqlEnum("resolution", wordResolutionValues).notNull().default("unreviewed"),
+
+  audioConfidence: decimal("audioConfidence", { precision: 4, scale: 3 }),
+  alignmentConfidence: decimal("alignmentConfidence", { precision: 4, scale: 3 }),
+  lexicalConfidence: decimal("lexicalConfidence", { precision: 4, scale: 3 }),
+  pronunciationConfidence: decimal("pronunciationConfidence", { precision: 4, scale: 3 }),
+  pronunciationContext: mysqlEnum("pronunciationContext", pronunciationContextValues).notNull().default("uncertain"),
+
+  attempts: int("attempts").notNull().default(0),
+  startMs: int("startMs"),
+  endMs: int("endMs"),
+  /** The dialect rule that explained this reading, e.g. TH-stopping. Never a label on a child. */
+  dialectFeature: varchar("dialectFeature", { length: 80 }),
+  source: varchar("source", { length: 40 }).notNull().default("built_in"),
+
+  provider: varchar("provider", { length: 80 }).notNull(),
+  providerVersion: varchar("providerVersion", { length: 80 }).notNull(),
+  policyVersion: varchar("policyVersion", { length: 80 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [
+  unique("reading_word_event_unique").on(table.sessionId, table.wordEventId),
+  unique("reading_word_token_unique").on(table.sessionId, table.tokenIndex),
+  check("reading_word_audio_confidence_range", sql`${table.audioConfidence} is null or ${table.audioConfidence} between 0 and 1`),
+  check("reading_word_alignment_confidence_range", sql`${table.alignmentConfidence} is null or ${table.alignmentConfidence} between 0 and 1`),
+  check("reading_word_lexical_confidence_range", sql`${table.lexicalConfidence} is null or ${table.lexicalConfidence} between 0 and 1`),
+  check("reading_word_pronunciation_confidence_range", sql`${table.pronunciationConfidence} is null or ${table.pronunciationConfidence} between 0 and 1`),
+  check("reading_word_token_index_range", sql`${table.tokenIndex} >= 0`),
+]);
+
+export type ReadingWord = typeof readingWords.$inferSelect;
 
 export type QuizAnswer = { questionIndex: number; selectedAnswer: string; correct: boolean };
 

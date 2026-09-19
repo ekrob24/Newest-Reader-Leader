@@ -755,8 +755,11 @@ export async function seedDemoCohort(scope: TenantScope, adminUserId: number) {
     if (!profile) throw new Error("Could not create a demo reading profile.");
     return profile;
   };
-  const amina = await ensureProfile(aminaUser.id, "Amina Roe", "Level 3 · Sky Blue", "FAMILY-AMINA");
-  const leo = await ensureProfile(leoUser.id, "Leo Davies", "Level 4 · Gold", "FAMILY-LEO");
+  // Distinct from the local demo cohort's codes: childProfiles.familyCode is unique, so a
+  // shared code makes the upsert below update the local demo learner's row instead of
+  // creating this one, and the lookup that follows then finds nothing.
+  const amina = await ensureProfile(aminaUser.id, "Amina Roe", "Level 3 · Sky Blue", "DEMO-AMINA");
+  const leo = await ensureProfile(leoUser.id, "Leo Davies", "Level 4 · Gold", "DEMO-LEO");
   await db.insert(classEnrollments).values([{ classId: readerClass.id, childProfileId: amina.id }, { classId: readerClass.id, childProfileId: leo.id }]).onDuplicateKeyUpdate({ set: { classId: readerClass.id } });
   await db.insert(familyLinks).values({ parentUserId: parentUser.id, childProfileId: amina.id }).onDuplicateKeyUpdate({ set: { parentUserId: parentUser.id } });
 

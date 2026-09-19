@@ -18,7 +18,7 @@ function isAccentVariation(moment: ReviewMoment) {
   return moment.eventType === "dialect_variation" || moment.provisionalIrishEnglish === true;
 }
 
-function MomentCard({ moment, index, sessionId }: { moment: ReviewMoment; index: number; sessionId: number }) {
+function MomentCard({ moment, index, sessionId }: { moment: ReviewMoment; index: number; sessionId: string }) {
   const utils = trpc.useUtils();
   const accentVariation = isAccentVariation(moment);
   const decide = trpc.readerLeader.sessions.decideIntervention.useMutation({
@@ -36,11 +36,11 @@ function MomentCard({ moment, index, sessionId }: { moment: ReviewMoment; index:
   return <article className={`review-moment-card ${accentVariation ? "accent-variation" : "reading-event"}`}><div className="review-moment-heading"><div><span className="moment-category">{accentVariation ? "Accent variation — please confirm" : "Reading event — teacher decision"}</span><h3>{accentVariation ? "Listen before deciding" : "Review the saved reading moment"}</h3></div>{decisionLabel ? <span className={`decision-state ${moment.teacherDecision}`}>{decisionLabel}</span> : <span className="decision-state pending">Decision needed</span>}</div><div className="word-comparison"><div><span>Expected word</span><b>{moment.word}</b></div><div><span>Heard word</span><b>{moment.heardWord || "Not captured"}</b></div></div><p className="moment-note">{moment.note}</p><div className="moment-actions"><button className="confirm-moment" onClick={() => decide.mutate({ sessionId, interventionIndex: index, teacherDecision: "confirmed" })} disabled={decide.isPending || moment.teacherDecision === "confirmed"}><Check size={15} /> {moment.teacherDecision === "confirmed" ? "Confirmed" : accentVariation ? "Confirm variation" : "Confirm event"}</button><button className="override-moment" onClick={() => decide.mutate({ sessionId, interventionIndex: index, teacherDecision: "overridden" })} disabled={decide.isPending || moment.teacherDecision === "overridden"}><X size={15} /> {moment.teacherDecision === "overridden" ? "Overridden" : "Override"}</button></div></article>;
 }
 
-function MomentGroup({ title, description, moments, sessionId, accent }: { title: string; description: string; moments: Array<{ moment: ReviewMoment; index: number }>; sessionId: number; accent: boolean }) {
+function MomentGroup({ title, description, moments, sessionId, accent }: { title: string; description: string; moments: Array<{ moment: ReviewMoment; index: number }>; sessionId: string; accent: boolean }) {
   return <section className={`review-moment-group ${accent ? "accent-group" : "error-group"}`}><div className="review-group-title"><span>{accent ? <ShieldCheck size={18} /> : <ClipboardCheck size={18} />}</span><div><div className="kicker">{accent ? "Separate category" : "Other saved events"}</div><h2>{title}</h2><p>{description}</p></div></div>{moments.length ? <div className="review-moment-list">{moments.map(({ moment, index }) => <MomentCard key={`${sessionId}-${index}`} moment={moment} index={index} sessionId={sessionId} />)}</div> : <p className="review-empty">{accent ? "No provisional accent variations were saved for this session." : "No additional flagged reading events were saved for this session."}</p>}</section>;
 }
 
-export function TeacherSessionReviewScreen({ sessionId }: { sessionId: number }) {
+export function TeacherSessionReviewScreen({ sessionId }: { sessionId: string }) {
   const [, setLocation] = useLocation();
   const review = trpc.readerLeader.sessions.teacherReview.useQuery({ sessionId });
 

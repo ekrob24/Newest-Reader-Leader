@@ -5,6 +5,7 @@ import { getAccentFairnessSummary, computeFlagOverturnRate } from "./accentMetri
 import { getDb } from "./db";
 import { listSessionsForAccentFairness } from "./readerDb";
 import { ensureTestSchool } from "./tenancyFixture";
+import { newSessionId } from "../shared/sessionId";
 
 const databaseAvailable = Boolean(process.env.DATABASE_URL);
 const testKey = `fair-${crypto.randomUUID().slice(0, 8)}`;
@@ -35,7 +36,7 @@ async function seedSchool(slug: string, name: string, sessions: StoredInterventi
   for (let index = 0; index < sessions.length; index += 1) {
     const interventions = sessions[index];
     await db.insert(readingSessions).values({
-      schoolId, childProfileId: profile.id, storyTitle: `${name} ${index}`, transcript: "t",
+      id: newSessionId(), schoolId, childProfileId: profile.id, storyTitle: `${name} ${index}`, transcript: "t",
       accuracy: 90, wordsCorrectPerMinute: 100, durationSeconds: 60,
       practiceWords: [], interventions, wordStates: [],
     });

@@ -1,4 +1,5 @@
 import { trpc } from "@/lib/trpc";
+import { PLACEHOLDER_SESSION_ID } from "@shared/sessionId";
 import { Download, Play, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -51,11 +52,11 @@ export function ReportDownloadButton({ childProfileId, audience, label }: { chil
 type WordTiming = { id: string; text: string; startMs: number; endMs: number };
 type PlaybackData = { url: string; transcript: string; wordTimings: WordTiming[] };
 
-function SessionAudioControl({ sessionId, label, highlight = false }: { sessionId?: number | null; label: string; highlight?: boolean }) {
+function SessionAudioControl({ sessionId, label, highlight = false }: { sessionId?: string | null; label: string; highlight?: boolean }) {
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stopTimerRef = useRef<number | null>(null);
-  const audioUrl = trpc.readerLeader.sessions.audioUrl.useQuery({ sessionId: sessionId ?? 1 }, { enabled: false, retry: false });
+  const audioUrl = trpc.readerLeader.sessions.audioUrl.useQuery({ sessionId: sessionId ?? PLACEHOLDER_SESSION_ID }, { enabled: false, retry: false });
 
   useEffect(() => () => {
     if (stopTimerRef.current !== null) window.clearTimeout(stopTimerRef.current);
@@ -106,19 +107,19 @@ function SessionAudioControl({ sessionId, label, highlight = false }: { sessionI
   return <><audio ref={audioRef} preload="metadata" data-testid={highlight ? "reading-highlight-audio" : "session-audio"} /><button className={`audio-action ${highlight ? "best-moment-action" : ""}`} onClick={() => void play()} disabled={audioUrl.isFetching || playing}><Play size={14} fill="currentColor" /> {audioUrl.isFetching ? "Loading…" : playing ? "Playing…" : label}</button></>;
 }
 
-export function SessionAudioButton({ sessionId, label = "Play recording" }: { sessionId?: number | null; label?: string }) {
+export function SessionAudioButton({ sessionId, label = "Play recording" }: { sessionId?: string | null; label?: string }) {
   return <SessionAudioControl sessionId={sessionId} label={label} />;
 }
 
-export function SessionHighlightButton({ sessionId, label = "Hear a reading highlight" }: { sessionId?: number | null; label?: string }) {
+export function SessionHighlightButton({ sessionId, label = "Hear a reading highlight" }: { sessionId?: string | null; label?: string }) {
   return <SessionAudioControl sessionId={sessionId} label={label} highlight />;
 }
 
-export function SessionTranscriptPlayer({ sessionId }: { sessionId?: number | null }) {
+export function SessionTranscriptPlayer({ sessionId }: { sessionId?: string | null }) {
   const [playback, setPlayback] = useState<PlaybackData | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStopTimerRef = useRef<number | null>(null);
-  const audioUrl = trpc.readerLeader.sessions.audioUrl.useQuery({ sessionId: sessionId ?? 1 }, { enabled: false, retry: false });
+  const audioUrl = trpc.readerLeader.sessions.audioUrl.useQuery({ sessionId: sessionId ?? PLACEHOLDER_SESSION_ID }, { enabled: false, retry: false });
 
   useEffect(() => () => {
     if (clipStopTimerRef.current !== null) window.clearTimeout(clipStopTimerRef.current);

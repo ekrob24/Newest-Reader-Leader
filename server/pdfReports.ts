@@ -3,7 +3,7 @@ import type { ReadingSession } from "../drizzle/schema";
 import type { ReportAudience } from "./readerReports";
 
 type Brand = { schoolName: string; accentColor: string; footerLine: string };
-type Comment = { sessionId: number; comment: string; createdAt: Date };
+type Comment = { sessionId: string; comment: string; createdAt: Date };
 
 function colorOrDefault(value: string) {
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#2563EB";

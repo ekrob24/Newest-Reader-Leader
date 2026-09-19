@@ -219,8 +219,17 @@ export type StoredIntervention = { word: string; action: "prompt" | "model" | "s
 export type StoredWordState = { id: string; text: string; status: "unread" | "current" | "correct" | "incorrect" | "retried_correct"; attempts: number };
 export type StoredWordTiming = { id: string; text: string; startMs: number; endMs: number };
 
+export const captureTimeSourceValues = ["device", "server"] as const;
+export type CaptureTimeSource = (typeof captureTimeSourceValues)[number];
+
+/**
+ * `id` is a ULID generated where the reading happens, not by the database — see
+ * shared/sessionId.ts. `capturedAt` is the classroom tablet's own clock as reported, kept
+ * alongside the server's `createdAt`; `capturedAtSource` records which of the two is
+ * authoritative when they disagree. See shared/captureTime.ts.
+ */
 export const readingSessions = mysqlTable("readingSessions", {
-  id: int("id").autoincrement().primaryKey(),
+  id: varchar("id", { length: 26 }).primaryKey(),
   schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   materialId: int("materialId").references(() => readingMaterials.id, { onDelete: "set null" }),
@@ -237,14 +246,18 @@ export const readingSessions = mysqlTable("readingSessions", {
   interventions: json("interventions").$type<StoredIntervention[]>().notNull(),
   wordStates: json("wordStates").$type<StoredWordState[]>().notNull(),
   wordTimings: json("wordTimings").$type<StoredWordTiming[]>(),
+  /** The device's clock as reported. Null when the device supplied none; never overwritten. */
+  capturedAt: timestamp("capturedAt"),
+  capturedAtSource: mysqlEnum("capturedAtSource", captureTimeSourceValues).notNull().default("server"),
+  /** The server's clock. Authoritative whenever capturedAtSource is "server". */
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 /** Each Irish English provisional transcript match remains confirmable by an authorised teacher. */
 export const provisionalMatchReviews = mysqlTable("provisionalMatchReviews", {
-  id: int("id").autoincrement().primaryKey(),
+  id: varchar("id", { length: 26 }).primaryKey(),
   schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
-  sessionId: int("sessionId").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 26 }).notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
   childProfileId: int("childProfileId").notNull().references(() => childProfiles.id, { onDelete: "cascade" }),
   classId: int("classId").references(() => readerClasses.id, { onDelete: "set null" }),
   expectedWord: varchar("expectedWord", { length: 80 }).notNull(),
@@ -257,9 +270,9 @@ export const provisionalMatchReviews = mysqlTable("provisionalMatchReviews", {
 });
 
 export const sessionComments = mysqlTable("sessionComments", {
-  id: int("id").autoincrement().primaryKey(),
+  id: varchar("id", { length: 26 }).primaryKey(),
   schoolId: int("schoolId").notNull().references(() => schools.id, { onDelete: "cascade" }),
-  sessionId: int("sessionId").notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
+  sessionId: varchar("sessionId", { length: 26 }).notNull().references(() => readingSessions.id, { onDelete: "cascade" }),
   teacherUserId: int("teacherUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
   comment: text("comment").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

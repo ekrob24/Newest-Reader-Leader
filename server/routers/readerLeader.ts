@@ -3,6 +3,7 @@ import { z } from "zod";
 import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { scopeForUser } from "../tenantScope";
+import { isSessionId } from "../../shared/sessionId";
 import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
@@ -111,6 +112,9 @@ function llmContentAsText(content: string | unknown[]): string {
 function safeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "reading-material";
 }
+
+/** A session (or session child row) identifier: a ULID generated at the point of capture. */
+const sessionIdInput = z.string().refine(isSessionId, "That is not a Reader Leader session identifier.");
 
 /**
  * The school this request acts in, taken from the authenticated account rather than looked up.
@@ -318,7 +322,7 @@ export const readerLeaderRouter = router({
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
       return { session, analysis };
     }),
-    teacherReview: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    teacherReview: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
       const review = await getTeacherSessionReview(tenantScope(ctx), input.sessionId);
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
@@ -326,7 +330,7 @@ export const readerLeaderRouter = router({
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
       return review;
     }),
-    decideIntervention: protectedProcedure.input(z.object({ sessionId: z.number().int().positive(), interventionIndex: z.number().int().min(0).max(100), teacherDecision: z.enum(["confirmed", "overridden"]) })).mutation(async ({ ctx, input }) => {
+    decideIntervention: protectedProcedure.input(z.object({ sessionId: sessionIdInput, interventionIndex: z.number().int().min(0).max(100), teacherDecision: z.enum(["confirmed", "overridden"]) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
       const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
@@ -339,7 +343,7 @@ export const readerLeaderRouter = router({
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child profile is not available to your account." });
       return getChildProgress(tenantScope(ctx), input.childProfileId);
     }),
-    audioUrl: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    audioUrl: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       const playback = await getSessionPlayback(tenantScope(ctx), input.sessionId);
       const session = playback?.session;
       if (!session || !session.audioStorageKey) throw new TRPCError({ code: "NOT_FOUND", message: "This saved session does not have an audio recording." });
@@ -348,14 +352,14 @@ export const readerLeaderRouter = router({
       const audio = await storageGet(session.audioStorageKey);
       return { ...audio, transcript: session.transcript, wordTimings: playback.wordTimings };
     }),
-    comments: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    comments: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This session is not available to your account." });
       return getSessionComments(tenantScope(ctx), [input.sessionId]);
     }),
-    addComment: protectedProcedure.input(z.object({ sessionId: z.number().int().positive(), comment: z.string().trim().min(2).max(1200) })).mutation(async ({ ctx, input }) => {
+    addComment: protectedProcedure.input(z.object({ sessionId: sessionIdInput, comment: z.string().trim().min(2).max(1200) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
       const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
@@ -414,7 +418,7 @@ export const readerLeaderRouter = router({
       requireTeacher(ctx.user.role);
       return deleteEducatorApprovedIrishVariant(tenantScope(ctx), ctx.user.id, input.variantId);
     }),
-    confirmMatch: protectedProcedure.input(z.object({ reviewId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    confirmMatch: protectedProcedure.input(z.object({ reviewId: sessionIdInput })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
       return confirmProvisionalMatchReview(tenantScope(ctx), ctx.user.id, input.reviewId);
     }),

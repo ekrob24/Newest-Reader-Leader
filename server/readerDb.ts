@@ -37,6 +37,8 @@ import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
+import { newSessionId } from "../shared/sessionId";
+import { resolveCaptureTime } from "../shared/captureTime";
 import { analyseReadingText } from "./reader";
 
 export type AuthenticatedReader = { id: number; role: AccountRole };
@@ -431,24 +433,31 @@ export async function saveReadingSession(scope: TenantScope, input: {
   interventions: StoredIntervention[];
   wordStates?: StoredWordState[];
   wordTimings?: StoredWordTiming[];
+  /** The capturing device's own clock. Reconciled against the server's, never trusted blindly. */
+  capturedAt?: Date | null;
 }) {
   const db = await scopedDb(scope);
-  await db.insert(readingSessions).values({ ...input, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates: input.wordStates ?? [], wordTimings: input.wordTimings ?? [], completed: 1 });
-  const [session] = await db.select().from(readingSessions).where(eq(readingSessions.childProfileId, input.childProfileId)).orderBy(desc(readingSessions.id)).limit(1);
-  if (!session) throw new Error("Could not save reading session.");
-  return session;
+  const { capturedAt, ...session } = input;
+  // The session carries its own identity from the moment of capture, so the row can be read
+  // back by that id instead of guessing at "the most recent row for this child".
+  const id = newSessionId();
+  const capture = resolveCaptureTime(capturedAt, new Date());
+  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates: input.wordStates ?? [], wordTimings: input.wordTimings ?? [], completed: 1 });
+  const [saved] = await db.select().from(readingSessions).where(eq(readingSessions.id, id)).limit(1);
+  if (!saved) throw new Error("Could not save reading session.");
+  return saved;
 }
 
-export async function getSessionById(scope: TenantScope, sessionId: number) {
+export async function getSessionById(scope: TenantScope, sessionId: string) {
   const db = await scopedDb(scope);
   const [session] = await db.select().from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
   return session;
 }
 
-export async function createProvisionalMatchReviews(scope: TenantScope, input: { sessionId: number; childProfileId: number; classId?: number; matches: { expectedWord: string; recognisedWord: string; source?: "built_in" | "educator_approved" }[] }) {
+export async function createProvisionalMatchReviews(scope: TenantScope, input: { sessionId: string; childProfileId: number; classId?: number; matches: { expectedWord: string; recognisedWord: string; source?: "built_in" | "educator_approved" }[] }) {
   if (!input.matches.length) return [];
   const db = await scopedDb(scope);
-  await db.insert(provisionalMatchReviews).values(input.matches.map(match => ({ sessionId: input.sessionId, childProfileId: input.childProfileId, classId: input.classId ?? null, expectedWord: normaliseIrishReadingWord(match.expectedWord), recognisedWord: normaliseIrishReadingWord(match.recognisedWord), source: match.source ?? "built_in" })));
+  await db.insert(provisionalMatchReviews).values(input.matches.map(match => ({ id: newSessionId(), sessionId: input.sessionId, childProfileId: input.childProfileId, classId: input.classId ?? null, expectedWord: normaliseIrishReadingWord(match.expectedWord), recognisedWord: normaliseIrishReadingWord(match.recognisedWord), source: match.source ?? "built_in" })));
   return db.select().from(provisionalMatchReviews).where(eq(provisionalMatchReviews.sessionId, input.sessionId)).orderBy(desc(provisionalMatchReviews.id));
 }
 
@@ -469,7 +478,7 @@ export async function listTeacherProvisionalMatches(scope: TenantScope, teacherU
     .orderBy(desc(provisionalMatchReviews.createdAt));
 }
 
-export async function confirmProvisionalMatchReview(scope: TenantScope, teacherUserId: number, reviewId: number) {
+export async function confirmProvisionalMatchReview(scope: TenantScope, teacherUserId: number, reviewId: string) {
   const db = await scopedDb(scope);
   const [review] = await db.select().from(provisionalMatchReviews).where(eq(provisionalMatchReviews.id, reviewId)).limit(1);
   if (!review?.classId) throw new Error("This provisional reading moment is not available to your class.");
@@ -493,13 +502,13 @@ export async function getTeacherClassVariationReview(scope: TenantScope, teacher
   return { readerClass, variants, reviews, branding };
 }
 
-export async function getSessionPlayback(scope: TenantScope, sessionId: number) {
+export async function getSessionPlayback(scope: TenantScope, sessionId: string) {
   const session = await getSessionById(scope, sessionId);
   if (!session) return undefined;
   return { session, wordTimings: session.wordTimings ?? [] };
 }
 
-export async function getTeacherSessionReview(scope: TenantScope, sessionId: number) {
+export async function getTeacherSessionReview(scope: TenantScope, sessionId: string) {
   const db = await scopedDb(scope);
   const [review] = await db.select({ session: readingSessions, childName: childProfiles.displayName, bookBand: childProfiles.bookBand })
     .from(readingSessions)
@@ -509,7 +518,7 @@ export async function getTeacherSessionReview(scope: TenantScope, sessionId: num
   return review;
 }
 
-export async function saveTeacherInterventionDecision(scope: TenantScope, sessionId: number, interventionIndex: number, teacherDecision: "confirmed" | "overridden") {
+export async function saveTeacherInterventionDecision(scope: TenantScope, sessionId: string, interventionIndex: number, teacherDecision: "confirmed" | "overridden") {
   const db = await scopedDb(scope);
   const session = await getSessionById(scope, sessionId);
   if (!session) throw new Error("Reading session not found.");
@@ -552,15 +561,15 @@ export async function saveSchoolBranding(scope: TenantScope, teacherUserId: numb
   return getSchoolBrandingForTeacher(scope, teacherUserId);
 }
 
-export async function addSessionComment(scope: TenantScope, input: { sessionId: number; teacherUserId: number; comment: string }) {
+export async function addSessionComment(scope: TenantScope, input: { sessionId: string; teacherUserId: number; comment: string }) {
   const db = await scopedDb(scope);
-  await db.insert(sessionComments).values({ ...input });
+  await db.insert(sessionComments).values({ id: newSessionId(), ...input });
   const [saved] = await db.select().from(sessionComments).where(and(eq(sessionComments.sessionId, input.sessionId), eq(sessionComments.teacherUserId, input.teacherUserId))).orderBy(desc(sessionComments.id)).limit(1);
   if (!saved) throw new Error("Could not save teacher feedback.");
   return saved;
 }
 
-export async function getSessionComments(scope: TenantScope, sessionIds: number[]) {
+export async function getSessionComments(scope: TenantScope, sessionIds: string[]) {
   const db = await scopedDb(scope);
   if (!sessionIds.length) return [];
   return db.select().from(sessionComments).where(inArray(sessionComments.sessionId, sessionIds)).orderBy(desc(sessionComments.createdAt));
@@ -766,8 +775,8 @@ export async function seedDemoCohort(scope: TenantScope, adminUserId: number) {
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, amina.id)).limit(1);
   if (!existingSession) {
     await db.insert(readingSessions).values([
-      { childProfileId: amina.id, storyTitle: "The Moonlight Kite", transcript: "Mina found a bright kite caught in the tall grass.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 92, completed: 1, practiceWords: ["glimmered", "gentle"], interventions: [{ word: "glimmered", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] },
-      { childProfileId: leo.id, storyTitle: "Rainy-Day Robot", transcript: "Rain tapped on Zuri's window all afternoon.", accuracy: 95, wordsCorrectPerMinute: 116, durationSeconds: 84, completed: 1, practiceWords: ["afternoon"], interventions: [], wordStates: [] },
+      { id: newSessionId(), childProfileId: amina.id, storyTitle: "The Moonlight Kite", transcript: "Mina found a bright kite caught in the tall grass.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 92, completed: 1, practiceWords: ["glimmered", "gentle"], interventions: [{ word: "glimmered", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] },
+      { id: newSessionId(), childProfileId: leo.id, storyTitle: "Rainy-Day Robot", transcript: "Rain tapped on Zuri's window all afternoon.", accuracy: 95, wordsCorrectPerMinute: 116, durationSeconds: 84, completed: 1, practiceWords: ["afternoon"], interventions: [], wordStates: [] },
     ]);
   }
   return { readerClass, childProfiles: [amina, leo], demoParentOpenId: parentUser.openId };
@@ -818,7 +827,7 @@ export async function provisionLocalDemoCohort() {
   await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, material.id));
   await db.insert(materialAssignments).values({ classId: readerClass.id, materialId: material.id }).onDuplicateKeyUpdate({ set: { materialId: material.id } });
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, profile.id)).limit(1);
-  if (!existingSession) await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", transcript: "Amina carried a little lantern into the garden at dusk.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 72, completed: 1, practiceWords: ["lantern", "hedgehog"], interventions: [{ word: "hedgehog", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] });
+  if (!existingSession) await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", transcript: "Amina carried a little lantern into the garden at dusk.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 72, completed: 1, practiceWords: ["lantern", "hedgehog"], interventions: [{ word: "hedgehog", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] });
   const accentShowcaseTitle = "Accent Showcase — The Thin Path";
   const [accentShowcaseSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, accentShowcaseTitle))).limit(1);
   if (!accentShowcaseSeed) {
@@ -827,20 +836,20 @@ export async function provisionLocalDemoCohort() {
     const durationSeconds = 30;
     const analysis = analyseReadingText(expectedText, transcript, durationSeconds, "ASSISTED_PRACTICE", undefined, "IRISH_ENGLISH_SUPPORT");
     const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
-    await db.insert(readingSessions).values({ childProfileId: profile.id, storyTitle: accentShowcaseTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, completed: 1, assessmentMode: analysis.mode, languageSupport: "IRISH_ENGLISH_SUPPORT", practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates });
+    await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, storyTitle: accentShowcaseTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, completed: 1, assessmentMode: analysis.mode, languageSupport: "IRISH_ENGLISH_SUPPORT", practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates });
   }
   const [historicalTrendSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Garden Walk · June"))).limit(1);
   if (!historicalTrendSeed) await db.insert(readingSessions).values([
-    { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", transcript: "Amina followed the path through the garden.", accuracy: 82, wordsCorrectPerMinute: 88, durationSeconds: 95, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["followed"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z") },
-    { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", transcript: "Amina followed the path through the quiet garden.", accuracy: 87, wordsCorrectPerMinute: 96, durationSeconds: 91, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["quiet"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z") },
-    { childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", transcript: "Amina followed the bright garden path with confidence.", accuracy: 92, wordsCorrectPerMinute: 104, durationSeconds: 85, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["confidence"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z") },
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", transcript: "Amina followed the path through the garden.", accuracy: 82, wordsCorrectPerMinute: 88, durationSeconds: 95, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["followed"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z") },
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", transcript: "Amina followed the path through the quiet garden.", accuracy: 87, wordsCorrectPerMinute: 96, durationSeconds: 91, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["quiet"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z") },
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", transcript: "Amina followed the bright garden path with confidence.", accuracy: 92, wordsCorrectPerMinute: 104, durationSeconds: 85, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["confidence"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z") },
   ]);
   const storageConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);
   if (storageConfigured) {
     const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
     if (!playbackFixture) {
       const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
-      await db.insert(readingSessions).values({ childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+      await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
     }
   }
   const [existingQuizAttempt] = await db.select({ id: quizAttempts.id }).from(quizAttempts).where(and(eq(quizAttempts.childProfileId, profile.id), eq(quizAttempts.materialId, material.id))).limit(1);

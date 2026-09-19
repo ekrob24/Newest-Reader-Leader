@@ -18,6 +18,11 @@ export async function getDb() {
   return _db;
 }
 
+/**
+ * UNSCOPED: the OAuth sign-in upsert. It runs before any school is known — this is where the
+ * account that a scope is later derived from comes into existence — so it uses the raw handle
+ * rather than the tenant seam. It touches only the caller's own `users` row.
+ */
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
     throw new Error("User openId is required for upsert");
@@ -77,6 +82,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 }
 
+/** UNSCOPED: the sign-in lookup that resolves an OAuth identity to the account, and with it
+ *  the school a request will be scoped to. Reads one `users` row by its unique openId. */
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) {

@@ -2,8 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
-import { readingSessions } from "../../drizzle/schema";
+import { scopeForUser } from "../tenantScope";
 import { getAccentFairnessSummary } from "../accentMetrics";
 import { analyseReadingText } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
@@ -42,6 +41,7 @@ import {
   listEducatorApprovedIrishVariants,
   listParentReminders,
   listTeacherProvisionalMatches,
+  listSessionsForAccentFairness,
   listTeacherClasses,
   listTeacherTermPresets,
   isTeacher,
@@ -112,31 +112,43 @@ function safeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "reading-material";
 }
 
+/**
+ * The school this request acts in, taken from the authenticated account rather than looked up.
+ * A break-glass support account carries no school and is refused here.
+ */
+function tenantScope(ctx: { user: { schoolId: number | null } }) {
+  try {
+    return scopeForUser(ctx.user);
+  } catch {
+    throw new TRPCError({ code: "FORBIDDEN", message: "This account is not a member of a school." });
+  }
+}
+
 export const readerLeaderRouter = router({
   account: router({
     me: protectedProcedure.query(async ({ ctx }) => {
       const role = ctx.user.role;
-      const profile = role === "child" ? await getChildProfileForUser(ctx.user.id) : null;
+      const profile = role === "child" ? await getChildProfileForUser(tenantScope(ctx), ctx.user.id) : null;
       return { user: ctx.user, role, profile };
     }),
     setupChild: protectedProcedure.input(z.object({ displayName: z.string().trim().min(2).max(80) })).mutation(async ({ ctx, input }) => {
-      await setUserRole(ctx.user.id, childRole.value);
-      const profile = await createChildProfile(ctx.user.id, input.displayName, code("FAMILY"));
+      await setUserRole(tenantScope(ctx), ctx.user.id, childRole.value);
+      const profile = await createChildProfile(tenantScope(ctx), ctx.user.id, input.displayName, code("FAMILY"));
       return { profile, familyCode: profile.familyCode };
     }),
     setupTeacher: protectedProcedure.input(z.object({ className: z.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
-      await setUserRole(ctx.user.id, teacherRole.value);
-      const readerClass = await createClassForTeacher(ctx.user.id, input.className, code("CLASS"));
+      await setUserRole(tenantScope(ctx), ctx.user.id, teacherRole.value);
+      const readerClass = await createClassForTeacher(tenantScope(ctx), ctx.user.id, input.className, code("CLASS"));
       return { readerClass, joinCode: readerClass.joinCode };
     }),
     linkParent: protectedProcedure.input(z.object({ familyCode: z.string().trim().min(4).max(12) })).mutation(async ({ ctx, input }) => {
-      await setUserRole(ctx.user.id, parentRole.value);
-      const profile = await linkParentToFamily(ctx.user.id, input.familyCode.toUpperCase());
+      await setUserRole(tenantScope(ctx), ctx.user.id, parentRole.value);
+      const profile = await linkParentToFamily(tenantScope(ctx), ctx.user.id, input.familyCode.toUpperCase());
       return { profile };
     }),
     joinClass: protectedProcedure.input(z.object({ classCode: z.string().trim().min(4).max(12) })).mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only child accounts can join a class." });
-      const readerClass = await enrollChildInClass(ctx.user.id, input.classCode.toUpperCase());
+      const readerClass = await enrollChildInClass(tenantScope(ctx), ctx.user.id, input.classCode.toUpperCase());
       return { readerClass };
     }),
   }),
@@ -155,15 +167,15 @@ export const readerLeaderRouter = router({
     }),
     assignedForMe: protectedProcedure.query(async ({ ctx }) => {
       if (ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Assigned reading materials are available to child accounts." });
-      return listAssignedMaterialsForChild(ctx.user.id);
+      return listAssignedMaterialsForChild(tenantScope(ctx), ctx.user.id);
     }),
     listMine: protectedProcedure.query(async ({ ctx }) => {
       requireTeacher(ctx.user.role);
-      return listTeacherMaterials(ctx.user.id);
+      return listTeacherMaterials(tenantScope(ctx), ctx.user.id);
     }),
     review: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const [review, classes] = await Promise.all([getTeacherMaterialReview(ctx.user.id, input.materialId), listTeacherClasses(ctx.user.id)]);
+      const [review, classes] = await Promise.all([getTeacherMaterialReview(tenantScope(ctx), ctx.user.id, input.materialId), listTeacherClasses(tenantScope(ctx), ctx.user.id)]);
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "This material is not available to your class." });
       return { ...review, availableClasses: classes.map(readerClass => ({ id: readerClass.id, name: readerClass.name, joinCode: readerClass.joinCode })) };
     }),
@@ -190,11 +202,11 @@ export const readerLeaderRouter = router({
         const stored = await storagePut(`reader-leader/materials/${ctx.user.id}/${safeFilename(input.sourceFilename)}`, bytes, input.sourceFileMime || "text/plain");
         storageKey = stored.key;
       }
-      return createReadingMaterial({ teacherUserId: ctx.user.id, title: input.title, author: input.author, rightsSource: input.rightsSource, interestAge: input.interestAge, genre: input.genre, readingLevel: input.readingLevel, summary: input.summary, sourceText: input.sourceText, sourceFilename: input.sourceFilename, storageKey });
+      return createReadingMaterial(tenantScope(ctx), { teacherUserId: ctx.user.id, title: input.title, author: input.author, rightsSource: input.rightsSource, interestAge: input.interestAge, genre: input.genre, readingLevel: input.readingLevel, summary: input.summary, sourceText: input.sourceText, sourceFilename: input.sourceFilename, storageKey });
     }),
     generateExercises: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const materials = await listTeacherMaterials(ctx.user.id);
+      const materials = await listTeacherMaterials(tenantScope(ctx), ctx.user.id);
       const material = materials.find(item => item.id === input.materialId);
       if (!material) throw new TRPCError({ code: "FORBIDDEN", message: "This material is not available to your class." });
       const prompt = `Create a concise, encouraging comprehension activity for children aged 8–10. Reading level: ${material.readingLevel}. Reading text:\n\n${material.sourceText.slice(0, 7000)}\n\nReturn only the requested structured result. Use accessible language. Include 3–6 meaningful vocabulary terms and 3–4 multiple-choice comprehension questions. Do not include sensitive, frightening, discriminatory, or adult content. Avoid diagnosing reading ability.`;
@@ -205,29 +217,29 @@ export const readerLeaderRouter = router({
       });
       const content = llmContentAsText(result.choices[0]?.message.content ?? "");
       const exerciseSet = assertSafeExerciseSet(exerciseSetSchema.parse(JSON.parse(content)));
-      const saved = await saveGeneratedExercises(material.id, exerciseSet, "gpt-5-mini");
+      const saved = await saveGeneratedExercises(tenantScope(ctx), material.id, exerciseSet, "gpt-5-mini");
       return { material, exercise: saved };
     }),
     saveExerciseDraft: protectedProcedure.input(z.object({ materialId: z.number().int().positive(), exerciseSet: exerciseSetSchema })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const materials = await listTeacherMaterials(ctx.user.id);
+      const materials = await listTeacherMaterials(tenantScope(ctx), ctx.user.id);
       const material = materials.find(item => item.id === input.materialId);
       if (!material) throw new TRPCError({ code: "FORBIDDEN", message: "This material is not available to your class." });
       const exerciseSet = assertSafeExerciseSet(input.exerciseSet);
-      const exercise = await saveGeneratedExercises(material.id, exerciseSet, "teacher-reviewed draft");
+      const exercise = await saveGeneratedExercises(tenantScope(ctx), material.id, exerciseSet, "teacher-reviewed draft");
       return { material, exercise };
     }),
     approve: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return { success: true, details: await approveReadingMaterial(ctx.user.id, input.materialId) };
+      return { success: true, details: await approveReadingMaterial(tenantScope(ctx), ctx.user.id, input.materialId) };
     }),
     makeAssignable: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return { success: true, details: await makeReadingMaterialAssignable(ctx.user.id, input.materialId) };
+      return { success: true, details: await makeReadingMaterialAssignable(tenantScope(ctx), ctx.user.id, input.materialId) };
     }),
     assign: protectedProcedure.input(z.object({ materialId: z.number().int().positive(), classIds: z.array(z.number().int().positive()).min(1).max(100).refine(classIds => new Set(classIds).size === classIds.length, "Choose each class only once.") })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return assignReadingMaterialToClasses(ctx.user.id, input.materialId, input.classIds);
+      return assignReadingMaterialToClasses(tenantScope(ctx), ctx.user.id, input.materialId, input.classIds);
     }),
   }),
   sessions: router({
@@ -243,13 +255,13 @@ export const readerLeaderRouter = router({
       assessmentMode: assessmentModeSchema.default("ASSISTED_PRACTICE"),
       wordStates: z.array(wordStateSchema).max(1000).optional(),
     })).mutation(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only the signed-in child can save this reading session." });
       const bytes = Buffer.from(input.audioBase64, "base64");
       if (bytes.byteLength === 0 || bytes.byteLength > 4_500_000) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Keep this practice recording under 4.5 MB and try again." });
       const mimeType = input.audioMime?.startsWith("audio/") ? input.audioMime : "audio/webm";
       const extension = mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
-      const [learnerSettings, irishVariantContext] = await Promise.all([getLearnerReadingSettings(input.childProfileId), getIrishVariantContextForChild(input.childProfileId)]);
+      const [learnerSettings, irishVariantContext] = await Promise.all([getLearnerReadingSettings(tenantScope(ctx), input.childProfileId), getIrishVariantContextForChild(tenantScope(ctx), input.childProfileId)]);
       const transcriptionPrompt = learnerSettings.languageSupport === "IRISH_ENGLISH_SUPPORT"
         ? "Transcribe a child reading aloud in Irish English. Preserve the words as spoken, including regional pronunciation. Do not correct mistakes or convert dialect features."
         : "Transcribe an English-speaking child reading aloud. Preserve the words as spoken. Do not correct mistakes.";
@@ -267,8 +279,8 @@ export const readerLeaderRouter = router({
       const analysis = analyseReadingText(input.expectedText, transcript, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport, irishVariantContext.variants);
       const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
       const wordTimings = buildWordTimings(transcript, analysis.durationSeconds, transcription?.segments);
-      const session = await saveReadingSession({ childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey: stored.key, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
-      await createProvisionalMatchReviews({ sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
+      const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey: stored.key, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
+      await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
       return { session, analysis, transcriptionStatus };
     }),
     save: protectedProcedure.input(z.object({
@@ -282,9 +294,9 @@ export const readerLeaderRouter = router({
       wordStates: z.array(wordStateSchema).max(1000).optional(),
       demoInterventions: z.array(z.object({ word: z.string().min(1).max(80), action: z.enum(["prompt", "model", "stay_silent", "teacher_review"]), note: z.string().min(1).max(300) })).max(3).optional().default([]),
     })).mutation(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only the signed-in child can save this reading session." });
-      const [learnerSettings, irishVariantContext] = await Promise.all([getLearnerReadingSettings(input.childProfileId), getIrishVariantContextForChild(input.childProfileId)]);
+      const [learnerSettings, irishVariantContext] = await Promise.all([getLearnerReadingSettings(tenantScope(ctx), input.childProfileId), getIrishVariantContextForChild(tenantScope(ctx), input.childProfileId)]);
       const analysis = analyseReadingText(input.expectedText, input.transcript, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport, irishVariantContext.variants);
       const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => {
         const action: "prompt" | "model" | "stay_silent" | "teacher_review" = event.action === "teacher_review"
@@ -302,162 +314,162 @@ export const readerLeaderRouter = router({
         };
       });
       const wordTimings = buildWordTimings(analysis.transcript, analysis.durationSeconds);
-      const session = await saveReadingSession({ childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions: [...input.demoInterventions, ...interventions], wordStates: analysis.wordStates, wordTimings });
-      await createProvisionalMatchReviews({ sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
+      const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions: [...input.demoInterventions, ...interventions], wordStates: analysis.wordStates, wordTimings });
+      await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
       return { session, analysis };
     }),
     teacherReview: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const review = await getTeacherSessionReview(input.sessionId);
+      const review = await getTeacherSessionReview(tenantScope(ctx), input.sessionId);
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, review.session.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, review.session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
       return review;
     }),
     decideIntervention: protectedProcedure.input(z.object({ sessionId: z.number().int().positive(), interventionIndex: z.number().int().min(0).max(100), teacherDecision: z.enum(["confirmed", "overridden"]) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const session = await getSessionById(input.sessionId);
+      const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
-      return saveTeacherInterventionDecision(input.sessionId, input.interventionIndex, input.teacherDecision);
+      return saveTeacherInterventionDecision(tenantScope(ctx), input.sessionId, input.interventionIndex, input.teacherDecision);
     }),
     childProgress: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child profile is not available to your account." });
-      return getChildProgress(input.childProfileId);
+      return getChildProgress(tenantScope(ctx), input.childProfileId);
     }),
     audioUrl: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      const playback = await getSessionPlayback(input.sessionId);
+      const playback = await getSessionPlayback(tenantScope(ctx), input.sessionId);
       const session = playback?.session;
       if (!session || !session.audioStorageKey) throw new TRPCError({ code: "NOT_FOUND", message: "This saved session does not have an audio recording." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This recording is not available to your account." });
       const audio = await storageGet(session.audioStorageKey);
       return { ...audio, transcript: session.transcript, wordTimings: playback.wordTimings };
     }),
     comments: protectedProcedure.input(z.object({ sessionId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      const session = await getSessionById(input.sessionId);
+      const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This session is not available to your account." });
-      return getSessionComments([input.sessionId]);
+      return getSessionComments(tenantScope(ctx), [input.sessionId]);
     }),
     addComment: protectedProcedure.input(z.object({ sessionId: z.number().int().positive(), comment: z.string().trim().min(2).max(1200) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const session = await getSessionById(input.sessionId);
+      const session = await getSessionById(tenantScope(ctx), input.sessionId);
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Reading session not found." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, session.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child is not assigned to your class." });
-      return addSessionComment({ sessionId: input.sessionId, teacherUserId: ctx.user.id, comment: input.comment });
+      return addSessionComment(tenantScope(ctx), { sessionId: input.sessionId, teacherUserId: ctx.user.id, comment: input.comment });
     }),
   }),
   learners: router({
     settings: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This learner is not available to your account." });
-      return getLearnerReadingSettings(input.childProfileId);
+      return getLearnerReadingSettings(tenantScope(ctx), input.childProfileId);
     }),
     saveSettings: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive(), defaultReadingMode: assessmentModeSchema, targetWcpm: z.number().int().min(30).max(250), languageSupport: languageSupportSchema.default("STANDARD_ENGLISH") })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This learner is not assigned to your class." });
-      return saveLearnerReadingSettings(input.childProfileId, { defaultReadingMode: input.defaultReadingMode, targetWcpm: input.targetWcpm, languageSupport: input.languageSupport });
+      return saveLearnerReadingSettings(tenantScope(ctx), input.childProfileId, { defaultReadingMode: input.defaultReadingMode, targetWcpm: input.targetWcpm, languageSupport: input.languageSupport });
     }),
   }),
   weeklyGoals: router({
     save: protectedProcedure.input(weeklyGoalSchema).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return saveWeeklyReadingGoal(ctx.user.id, input);
+      return saveWeeklyReadingGoal(tenantScope(ctx), ctx.user.id, input);
     }),
   }),
   classes: router({
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(120) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return createAdditionalClassForTeacher(ctx.user.id, input.name, code("CLASS"));
+      return createAdditionalClassForTeacher(tenantScope(ctx), ctx.user.id, input.name, code("CLASS"));
     }),
     addLearner: protectedProcedure.input(z.object({ classId: z.number().int().positive(), displayName: z.string().trim().min(2).max(80), bookBand: z.string().trim().min(2).max(80) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return addLearnerToTeacherClass({ teacherUserId: ctx.user.id, ...input, familyCode: code("FAM") });
+      return addLearnerToTeacherClass(tenantScope(ctx), { teacherUserId: ctx.user.id, ...input, familyCode: code("FAM") });
     }),
     importLearners: protectedProcedure.input(z.object({ classId: z.number().int().positive(), rows: z.array(z.object({ row: z.number().int().min(2).max(101), displayName: z.string().trim().min(1).max(80), bookBand: z.string().trim().min(2).max(80).optional() })).min(1).max(100) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return addLearnersToTeacherClass({ teacherUserId: ctx.user.id, classId: input.classId, rows: input.rows, createFamilyCode: () => code("FAM") });
+      return addLearnersToTeacherClass(tenantScope(ctx), { teacherUserId: ctx.user.id, classId: input.classId, rows: input.rows, createFamilyCode: () => code("FAM") });
     }),
     saveLanguageSupportDefault: protectedProcedure.input(z.object({ classId: z.number().int().positive(), languageSupport: languageSupportSchema })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return saveClassLanguageSupportDefault(ctx.user.id, input.classId, input.languageSupport);
+      return saveClassLanguageSupportDefault(tenantScope(ctx), ctx.user.id, input.classId, input.languageSupport);
     }),
   }),
   irishVariants: router({
     list: protectedProcedure.input(z.object({ classId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return listEducatorApprovedIrishVariants(ctx.user.id, input.classId);
+      return listEducatorApprovedIrishVariants(tenantScope(ctx), ctx.user.id, input.classId);
     }),
     approve: protectedProcedure.input(z.object({ classId: z.number().int().positive(), expectedWord: z.string().trim().min(1).max(80), recognisedVariant: z.string().trim().min(1).max(80) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return approveIrishVariantForClass({ teacherUserId: ctx.user.id, ...input });
+      return approveIrishVariantForClass(tenantScope(ctx), { teacherUserId: ctx.user.id, ...input });
     }),
     remove: protectedProcedure.input(z.object({ variantId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return deleteEducatorApprovedIrishVariant(ctx.user.id, input.variantId);
+      return deleteEducatorApprovedIrishVariant(tenantScope(ctx), ctx.user.id, input.variantId);
     }),
     confirmMatch: protectedProcedure.input(z.object({ reviewId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return confirmProvisionalMatchReview(ctx.user.id, input.reviewId);
+      return confirmProvisionalMatchReview(tenantScope(ctx), ctx.user.id, input.reviewId);
     }),
     csv: protectedProcedure.input(z.object({ classId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const exportData = await getTeacherIrishVariantExport(ctx.user.id, input.classId);
+      const exportData = await getTeacherIrishVariantExport(tenantScope(ctx), ctx.user.id, input.classId);
       return { filename: irishVariantFilename(exportData.className), csv: createIrishVariantCsv(exportData.className, exportData.variants) };
     }),
     pendingMatches: protectedProcedure.input(z.object({ classId: z.number().int().positive().optional(), childProfileId: z.number().int().positive().optional(), range: trendDateRangeSchema }).refine(input => !input.range?.startDate || !input.range?.endDate || input.range.startDate <= input.range.endDate, { message: "Choose an end date on or after the start date." })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return listTeacherProvisionalMatches(ctx.user.id, { classId: input.classId, childProfileId: input.childProfileId, ...input.range });
+      return listTeacherProvisionalMatches(tenantScope(ctx), ctx.user.id, { classId: input.classId, childProfileId: input.childProfileId, ...input.range });
     }),
   }),
   termPresets: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       requireTeacher(ctx.user.role);
-      return listTeacherTermPresets(ctx.user.id);
+      return listTeacherTermPresets(tenantScope(ctx), ctx.user.id);
     }),
     save: protectedProcedure.input(termPresetSchema).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return saveTeacherTermPreset(ctx.user.id, input);
+      return saveTeacherTermPreset(tenantScope(ctx), ctx.user.id, input);
     }),
     remove: protectedProcedure.input(z.object({ presetId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return deleteTeacherTermPreset(ctx.user.id, input.presetId);
+      return deleteTeacherTermPreset(tenantScope(ctx), ctx.user.id, input.presetId);
     }),
   }),
   homePractice: router({
     saveChecklist: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive(), completedSteps: z.array(z.boolean()).max(3) })).mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "Home-practice checklists are available to linked parent accounts." });
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This learner is not linked to your family account." });
-      return saveHomePracticeChecklist(ctx.user.id, input.childProfileId, input.completedSteps);
+      return saveHomePracticeChecklist(tenantScope(ctx), ctx.user.id, input.childProfileId, input.completedSteps);
     }),
     markReminderRead: protectedProcedure.input(z.object({ reminderId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "This reminder centre is available to parent accounts." });
-      await markParentReminderRead(ctx.user.id, input.reminderId);
+      await markParentReminderRead(tenantScope(ctx), ctx.user.id, input.reminderId);
       return { success: true } as const;
     }),
     markAllRemindersRead: protectedProcedure.mutation(async ({ ctx }) => {
       if (ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "This reminder centre is available to parent accounts." });
-      return markAllParentRemindersRead(ctx.user.id);
+      return markAllParentRemindersRead(tenantScope(ctx), ctx.user.id);
     }),
     reminders: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive().optional(), range: trendDateRangeSchema })).query(async ({ ctx, input }) => {
       if (ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "This reminder centre is available to parent accounts." });
-      if (input.childProfileId && !(await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId))) {
+      if (input.childProfileId && !(await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "This learner is not linked to your family account." });
       }
-      return listParentReminders(ctx.user.id, { childProfileId: input.childProfileId, ...input.range });
+      return listParentReminders(tenantScope(ctx), ctx.user.id, { childProfileId: input.childProfileId, ...input.range });
     }),
   }),
   quizzes: router({
     forAssignedMaterial: protectedProcedure.input(z.object({ materialId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       if (ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Quizzes are available to child accounts." });
-      const material = await getAssignedMaterialForChild(ctx.user.id, input.materialId);
+      const material = await getAssignedMaterialForChild(tenantScope(ctx), ctx.user.id, input.materialId);
       if (!material?.exerciseSet) throw new TRPCError({ code: "NOT_FOUND", message: "There is no approved quiz for this reading passage yet." });
       return { materialId: material.id, title: material.title, activity: material.exerciseSet.activity, questions: material.exerciseSet.questions.map(question => ({ prompt: question.prompt, options: question.options })) };
     }),
@@ -466,85 +478,82 @@ export const readerLeaderRouter = router({
       materialId: z.number().int().positive(),
       answers: z.array(z.object({ questionIndex: z.number().int().min(0), selectedAnswer: z.string().min(1).max(120) })).min(1).max(4),
     })).mutation(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only the signed-in child can submit this quiz." });
-      const material = await getAssignedMaterialForChild(ctx.user.id, input.materialId);
+      const material = await getAssignedMaterialForChild(tenantScope(ctx), ctx.user.id, input.materialId);
       if (!material?.exerciseSet) throw new TRPCError({ code: "NOT_FOUND", message: "This assigned passage does not have an approved quiz." });
       const answers = scoreQuiz(material.exerciseSet.questions, input.answers);
       const score = answers.filter(answer => answer.correct).length;
-      const attempt = await saveQuizAttempt({ childProfileId: input.childProfileId, materialId: input.materialId, answers, score, totalQuestions: material.exerciseSet.questions.length });
+      const attempt = await saveQuizAttempt(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, answers, score, totalQuestions: material.exerciseSet.questions.length });
       return { attempt, score, totalQuestions: material.exerciseSet.questions.length, explanations: material.exerciseSet.questions.map((question, index) => ({ questionIndex: index, explanation: question.explanation })) };
     }),
     history: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Quiz history is available to the signed-in child." });
-      return getQuizHistory(input.childProfileId);
+      return getQuizHistory(tenantScope(ctx), input.childProfileId);
     }),
   }),
   reports: router({
     monthlyTrend: protectedProcedure.input(z.object({ classId: z.number().int().positive().optional(), range: trendDateRangeSchema })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return getTeacherMonthlyTrendExport(ctx.user.id, input.classId, input.range);
+      return getTeacherMonthlyTrendExport(tenantScope(ctx), ctx.user.id, input.classId, input.range);
     }),
     monthlyTrendCsv: protectedProcedure.input(z.object({ classId: z.number().int().positive().optional(), range: trendDateRangeSchema })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const trend = await getTeacherMonthlyTrendExport(ctx.user.id, input.classId, input.range);
+      const trend = await getTeacherMonthlyTrendExport(tenantScope(ctx), ctx.user.id, input.classId, input.range);
       return { filename: monthlyTrendFilename(trend.className, input.range), csv: createMonthlyTrendCsv(trend.className, trend.points) };
     }),
     classVariationReviewPdf: protectedProcedure.input(z.object({ classId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      const review = await getTeacherClassVariationReview(ctx.user.id, input.classId);
+      const review = await getTeacherClassVariationReview(tenantScope(ctx), ctx.user.id, input.classId);
       const data = await createClassVariationReviewPdf({ className: review.readerClass.name, branding: review.branding, variants: review.variants, reviews: review.reviews });
       return { filename: `${review.readerClass.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-class-variation-review.pdf`, mimeType: "application/pdf", dataBase64: data.toString("base64") };
     }),
     download: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive(), audience: z.enum(["child", "parent", "teacher"]) })).query(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This report is not available to your account." });
       if (input.audience === "child" && ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
       if (input.audience === "parent" && ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
       if (input.audience === "teacher" && !isTeacher(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
-      const progress = await getChildProgress(input.childProfileId);
+      const progress = await getChildProgress(tenantScope(ctx), input.childProfileId);
       return createReadingReport({ audience: input.audience, childName: progress.profile.displayName, bookBand: progress.profile.bookBand, sessions: progress.sessions });
     }),
     downloadPdf: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive(), audience: z.enum(["child", "parent", "teacher"]) })).query(async ({ ctx, input }) => {
-      const allowed = await mayAccessChildProfile({ id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
+      const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This report is not available to your account." });
       if (input.audience === "child" && ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
       if (input.audience === "parent" && ctx.user.role !== "parent") throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
       if (input.audience === "teacher" && !isTeacher(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Use the report designed for your account." });
-      const context = await getReportContext(input.childProfileId);
+      const context = await getReportContext(tenantScope(ctx), input.childProfileId);
       const data = await createBrandedPdfReport({ audience: input.audience, childName: context.profile.displayName, bookBand: context.profile.bookBand, sessions: context.sessions, branding: context.branding, comments: context.comments });
       return { filename: `${context.profile.displayName.toLowerCase().replace(/\s+/g, "-")}-${input.audience}-reading-report.pdf`, mimeType: "application/pdf", dataBase64: data.toString("base64") };
     }),
   }),
   branding: router({
-    mine: protectedProcedure.query(async ({ ctx }) => { requireTeacher(ctx.user.role); return getSchoolBrandingForTeacher(ctx.user.id); }),
+    mine: protectedProcedure.query(async ({ ctx }) => { requireTeacher(ctx.user.role); return getSchoolBrandingForTeacher(tenantScope(ctx), ctx.user.id); }),
     save: protectedProcedure.input(z.object({ schoolName: z.string().trim().min(2).max(120), accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/), footerLine: z.string().trim().min(4).max(180) })).mutation(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
-      return saveSchoolBranding(ctx.user.id, input);
+      return saveSchoolBranding(tenantScope(ctx), ctx.user.id, input);
     }),
   }),
   dashboards: router({
     teacher: protectedProcedure.query(async ({ ctx }) => {
       requireTeacher(ctx.user.role);
-      return getTeacherDashboard(ctx.user.id);
+      return getTeacherDashboard(tenantScope(ctx), ctx.user.id);
     }),
     accentFairness: protectedProcedure.query(async ({ ctx }) => {
       requireTeacher(ctx.user.role);
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Reader Leader data is temporarily unavailable." });
-      const sessions = await db.select({ id: readingSessions.id, interventions: readingSessions.interventions }).from(readingSessions);
-      return getAccentFairnessSummary(sessions);
+      return getAccentFairnessSummary(await listSessionsForAccentFairness(tenantScope(ctx)));
     }),
     parent: protectedProcedure.query(async ({ ctx }) => {
       if (ctx.user.role !== "parent" && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "This dashboard is available to parent accounts." });
-      return getParentDashboard(ctx.user.id);
+      return getParentDashboard(tenantScope(ctx), ctx.user.id);
     }),
   }),
   demo: router({
     seedCohort: protectedProcedure.mutation(async ({ ctx }) => {
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only an administrator can create the guided demo cohort." });
-      return seedDemoCohort(ctx.user.id);
+      return seedDemoCohort(tenantScope(ctx), ctx.user.id);
     }),
   }),
 });

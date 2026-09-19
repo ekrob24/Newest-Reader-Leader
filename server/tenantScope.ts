@@ -151,10 +151,20 @@ type RawTransaction = Parameters<Parameters<RawDatabase["transaction"]>[0]>[0];
  * row types; the implementation substitutes guarded builders behind that signature. Callers
  * only ever reach `.from`, `.values` and `.set` from these, which the implementation provides.
  */
+/** The seam owns `schoolId`, so a caller neither supplies it nor can contradict it. */
+export type TenantInsertValues<TTable extends MySqlTable> = Omit<TTable["$inferInsert"], "schoolId">;
+
+interface TenantInsertBuilder extends Promise<unknown> {
+  onDuplicateKeyUpdate(config: { set: Record<string, unknown> }): Promise<unknown>;
+  toSQL(): { sql: string; params: unknown[] };
+}
+
 export type TenantDatabase = {
   readonly scope: TenantScope;
   select: RawDatabase["select"];
-  insert: RawDatabase["insert"];
+  insert: <TTable extends MySqlTable>(table: TTable) => {
+    values(values: TenantInsertValues<TTable> | TenantInsertValues<TTable>[]): TenantInsertBuilder;
+  };
   update: RawDatabase["update"];
   delete: RawDatabase["delete"];
   transaction<T>(callback: (tx: TenantDatabase) => Promise<T>): Promise<T>;
@@ -182,7 +192,7 @@ export function tenantDb(raw: RawDatabase | RawTransaction, scope: TenantScope):
         return guardBuilder(inserter.values(scoped), scope, null);
       },
     };
-  }) as unknown as RawDatabase["insert"];
+  }) as unknown as TenantDatabase["insert"];
 
   const update = ((table: MySqlTable) => {
     const predicate = tenantPredicate(table, scope);

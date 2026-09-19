@@ -32,17 +32,38 @@ export function createReadingPages(text: string, maxWordsPerPage = 42): ReadingP
   return pages;
 }
 
-/** Returns true only when every word on the current page has been settled for that mode. */
+/**
+ * Whether the reader has finished with this page.
+ *
+ * A miscue is something to record, not a gate. A running record notes that a word was
+ * misread and the reader carried on; it does not stop the reading until the word is fixed.
+ * The rule used to demand that every word on the page be settled, which meant one word the
+ * recogniser never caught — "a" and "at" are the usual ones, short and unstressed — held the
+ * child on that page for the rest of the session. Repeating the word could not clear it
+ * either: the transcript is matched from the beginning in order, so a word said again after
+ * the reader has moved on lands against a later part of the passage and never reaches the
+ * word it was meant to fix.
+ */
 export function isReadingPageComplete(page: ReadingPage | undefined, states: LiveWordState[], mode: "GUIDED_PRACTICE" | "ASSISTED_PRACTICE" | "MONTHLY_ASSESSMENT"): boolean {
   if (!page || page.endWordIndex < page.startWordIndex) return false;
-  return states.slice(page.startWordIndex, page.endWordIndex + 1).every(state => {
+  const pageStates = states.slice(page.startWordIndex, page.endWordIndex + 1);
+  if (!pageStates.length) return false;
+
+  // The furthest word on this page the reader has actually read. Anything flagged before it
+  // is behind them.
+  let lastRead = -1;
+  pageStates.forEach((state, index) => {
+    if (state.status === "correct" || state.status === "retried_correct") lastRead = index;
+  });
+
+  return pageStates.every((state, index) => {
     if (state.status === "correct" || state.status === "retried_correct") return true;
-    if (state.status !== "incorrect") return false;
+    // Not reached yet, or the word the reader is on right now.
+    if (state.status === "unread" || state.status === "current") return false;
     if (mode === "MONTHLY_ASSESSMENT") return true;
-    // A word the child chose to leave, or one they have genuinely tried three times.
-    // Deciding this on attempts alone is what trapped a misheard reader: the speech
-    // recogniser flags a word after one attempt, and until this returned true there was
-    // no way forward on the page at all.
-    return state.movedOn === true || state.attempts >= 3;
+    // Left deliberately, or genuinely tried three times.
+    if (state.movedOn === true || state.attempts >= 3) return true;
+    // Read past: a later word on this page has been read aloud, so the reader has gone by.
+    return index < lastRead;
   });
 }

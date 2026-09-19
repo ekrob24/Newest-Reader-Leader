@@ -406,7 +406,10 @@ function ReadingView({ story, storyWords, processedWords, state, recognitionStat
     if (pageIndex >= pages.length - 1 || !isReadingPageComplete(activePage, wordStates, assessmentMode)) return;
     setPageIndex(current => Math.min(current + 1, pages.length - 1));
   }, [activePage, assessmentMode, pageIndex, pages.length, wordStates]);
-  const currentWord = wordStates.find(word => word.status === "current") ?? wordStates.find(word => word.status === "incorrect");
+  // Scoped to the page on screen. Searching the whole passage kept pointing the retry
+  // prompt at a word from a page the reader had already left behind.
+  const pageWordStates = wordStates.slice(activePage.startWordIndex, activePage.endWordIndex + 1);
+  const currentWord = pageWordStates.find(word => word.status === "current") ?? pageWordStates.find(word => word.status === "incorrect");
   const needsGentleRetry = assessmentMode !== "MONTHLY_ASSESSMENT" && currentWord?.status === "incorrect";
   // Offered as soon as a word is flagged, not after three tries. The speech recogniser
   // mishears a word on the first attempt, and until this appeared there was nothing on the

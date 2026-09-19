@@ -45,11 +45,12 @@ describe("a misheard reader can always move forward", () => {
         ? { ...state, status: "correct" as const, ...overrides }
         : { ...state, status: "correct" as const });
 
-  it("holds the page while a flagged word has had one attempt and no decision", () => {
-    // The product asking the child to try again. Correct on its own — it is the absence of
-    // any way out of it that was the bug.
-    const misheard = pageStates({ id: "word-2", status: "incorrect", attempts: 1 });
-    expect(isReadingPageComplete(page as never, misheard, "ASSISTED_PRACTICE")).toBe(false);
+  it("holds the page while the reader is still on the flagged word", () => {
+    // The product asking the child to try again, which is right while they are there.
+    // Nothing after it has been read, so the reader has not gone past.
+    const onIt = initialLiveWordStates(passage).map((state, index) =>
+      index < 2 ? { ...state, status: "correct" as const } : index === 2 ? { ...state, status: "incorrect" as const, attempts: 1 } : state);
+    expect(isReadingPageComplete(page as never, onIt, "ASSISTED_PRACTICE")).toBe(false);
   });
 
   it("lets the page move on the moment the child chooses to leave the word", () => {
@@ -69,5 +70,38 @@ describe("a misheard reader can always move forward", () => {
   it("never holds a monthly assessment, which does not ask for retries", () => {
     const misheard = pageStates({ id: "word-2", status: "incorrect", attempts: 1 });
     expect(isReadingPageComplete(page as never, misheard, "MONTHLY_ASSESSMENT")).toBe(true);
+  });
+});
+
+describe("a word the reader has already gone past does not hold the page", () => {
+  // Reproduces a reported session exactly: "Amina carried a little lantern into the garden
+  // at dusk." with "a" and "at" flagged and every other word read, including the last.
+  // Short unstressed words are the ones a recogniser drops, and they are the ones a child
+  // cannot fix by repeating: the transcript is matched in order from the start, so a word
+  // said again lands against a later part of the passage.
+  const passage = "Amina carried a little lantern into the garden at dusk";
+  const page = { index: 0, startWordIndex: 0, endWordIndex: 9, tokens: [], text: passage };
+
+  const reportedSession = initialLiveWordStates(passage).map(state =>
+    state.text === "a" || state.text === "at"
+      ? { ...state, status: "incorrect" as const, attempts: 1 }
+      : { ...state, status: "correct" as const, attempts: 1 });
+
+  it("lets the reader continue once later words have been read", () => {
+    expect(isReadingPageComplete(page as never, reportedSession, "ASSISTED_PRACTICE")).toBe(true);
+    expect(isReadingPageComplete(page as never, reportedSession, "GUIDED_PRACTICE")).toBe(true);
+  });
+
+  it("still waits while the reader is on the flagged word at the end", () => {
+    // Nothing has been read after it, so the reader is still there and the coach should ask.
+    const stuckOnLast = initialLiveWordStates(passage).map((state, index) =>
+      index === 9 ? { ...state, status: "incorrect" as const, attempts: 1 } : { ...state, status: "correct" as const, attempts: 1 });
+    expect(isReadingPageComplete(page as never, stuckOnLast, "ASSISTED_PRACTICE")).toBe(false);
+  });
+
+  it("still waits for words the reader has not reached", () => {
+    const halfRead = initialLiveWordStates(passage).map((state, index) =>
+      index < 4 ? { ...state, status: "correct" as const, attempts: 1 } : state);
+    expect(isReadingPageComplete(page as never, halfRead, "ASSISTED_PRACTICE")).toBe(false);
   });
 });

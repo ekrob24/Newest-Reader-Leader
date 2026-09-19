@@ -22,6 +22,9 @@ if (!url) {
 const force = process.argv.includes("--force");
 
 async function main() {
+  // The database itself may not exist yet on a fresh machine; drizzle-kit needs it to.
+  execFileSync("node", ["scripts/ensure-database.mjs"], { stdio: "inherit" });
+
   const connection = await mysql.createConnection(url);
   try {
     const [tables] = await connection.query("SHOW TABLES LIKE 'readingSessions'");

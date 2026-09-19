@@ -14,6 +14,10 @@
 .EXAMPLE
   .\scripts\run-local.ps1
 #>
+param(
+  # The MySQL root password on this machine. Whatever you chose when you installed MySQL.
+  [string]$MysqlPassword = $env:MYSQL_ROOT_PASSWORD
+)
 $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
@@ -41,14 +45,23 @@ try {
 if (-not $mysqlUp) {
   Write-Host "No MySQL is listening on 127.0.0.1:3306." -ForegroundColor Red
   Write-Host ""
-  Write-Host "If you have Docker Desktop, start one with:"
+  Write-Host "With Docker Desktop:"
   Write-Host '  docker run -d --name rl-mysql -e MYSQL_ROOT_PASSWORD=rlroot -p 3306:3306 mysql:8.0'
   Write-Host ""
-  Write-Host "Wait about thirty seconds for it to finish starting, then run this script again."
+  Write-Host "Without Docker, install MySQL Server 8 and start it, then re-run this with the"
+  Write-Host "root password you chose:"
+  Write-Host '  powershell -ExecutionPolicy Bypass -File .\scriptsun-local.ps1 -MysqlPassword "yourpassword"'
+  Write-Host ""
+  Write-Host "Wait about thirty seconds after starting MySQL before trying again."
   exit 1
 }
 
-if (-not $env:DATABASE_URL) { $env:DATABASE_URL = "mysql://root:rlroot@127.0.0.1:3306/rl_local" }
+if (-not $env:DATABASE_URL) {
+  # The script creates the database itself, so only the server and a working root login
+  # have to exist beforehand.
+  $password = if ($MysqlPassword) { [uri]::EscapeDataString($MysqlPassword) } else { "rlroot" }
+  $env:DATABASE_URL = "mysql://root:$password@127.0.0.1:3306/rl_local"
+}
 if (-not $env:JWT_SECRET)   { $env:JWT_SECRET   = "local-development-secret" }
 if (-not $env:VITE_APP_ID)  { $env:VITE_APP_ID  = "reader-leader-local" }
 if (-not $env:PORT)         { $env:PORT         = "3100" }
@@ -62,7 +75,9 @@ pnpm install --frozen-lockfile
 
 Write-Host "Preparing the database..." -ForegroundColor Cyan
 pnpm seed:preview
-if ($LASTEXITCODE -ne 0) { Write-Host "(database already seeded - continuing)" }
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "(database already seeded, or MySQL refused the login - continuing)"
+}
 
 Write-Host "Building..." -ForegroundColor Cyan
 pnpm build

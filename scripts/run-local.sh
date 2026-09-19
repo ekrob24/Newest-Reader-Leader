@@ -16,7 +16,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-export DATABASE_URL="${DATABASE_URL:-mysql://root:rlroot@127.0.0.1:3306/rl_local}"
+# The script creates the database itself; only the server and a root login need to exist.
+export DATABASE_URL="${DATABASE_URL:-mysql://root:${MYSQL_ROOT_PASSWORD:-rlroot}@127.0.0.1:3306/rl_local}"
 export JWT_SECRET="${JWT_SECRET:-local-development-secret}"
 export VITE_APP_ID="${VITE_APP_ID:-reader-leader-local}"
 export NODE_ENV=production

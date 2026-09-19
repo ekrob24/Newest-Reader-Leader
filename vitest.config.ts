@@ -14,6 +14,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["server/**/*.test.ts", "server/**/*.spec.ts", "shared/**/*.test.ts", "shared/**/*.spec.ts"],
+    // client/** carries no tests today. It is included so that when one is added it runs,
+    // rather than sitting collected-by-nobody the way shared/** did until Stage 2.
+    include: [
+      "server/**/*.test.ts", "server/**/*.spec.ts",
+      "shared/**/*.test.ts", "shared/**/*.spec.ts",
+      "client/**/*.test.ts", "client/**/*.test.tsx", "client/**/*.spec.ts", "client/**/*.spec.tsx",
+    ],
   },
 });

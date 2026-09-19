@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+
+    # The database is not optional. Seven suites cover tenancy isolation, the session key
+    # change, the exercise approval gate and the readingWords write path, and every one of
+    # them skips silently without DATABASE_URL. A job without a database would report green
+    # while covering none of it.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: readerleader
+          MYSQL_DATABASE: readerleader
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -preaderleader"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=30s
+
+    env:
+      DATABASE_URL: mysql://root:readerleader@127.0.0.1:3306/readerleader
+      # demoAuth.test.ts fails on empty input, so these must be set even though they are
+      # local-demo credentials with no production meaning.
+      READER_LEADER_CHILD_DEMO_PASSWORD: ci-child-demo
+      READER_LEADER_TEACHER_DEMO_PASSWORD: ci-teacher-demo
+      READER_LEADER_PARENT_DEMO_PASSWORD: ci-parent-demo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm check
+
+      - name: Wait for MySQL
+        run: |
+          for attempt in $(seq 1 60); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -preaderleader --silent 2>/dev/null; then
+              echo "MySQL is up after ${attempt} attempt(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL never became reachable." >&2
+          exit 1
+
+      - name: Apply migrations
+        run: pnpm drizzle-kit migrate
+
+      - name: Test
+        run: pnpm vitest run --reporter=json --outputFile=vitest-report.json
+
+      # A skipped suite must turn CI red. This also asserts a floor on the collected count,
+      # because a collection failure reports zero skipped and would otherwise pass.
+      - name: Assert every test ran
+        if: always()
+        run: node scripts/assert-test-coverage.mjs vitest-report.json
+
+      - name: Build
+        run: pnpm build

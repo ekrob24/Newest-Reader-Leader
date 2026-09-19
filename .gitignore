@@ -120,3 +120,9 @@ demo-recording/
 
 # Generated preview credentials. Never committed — see DEPLOY_PREVIEW.md.
 preview-secrets.local.txt
+
+# Python probe scripts
+__pycache__/
+*.pyc
+alignment-probe.json
+alignment-probe.wav

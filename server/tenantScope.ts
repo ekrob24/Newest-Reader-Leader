@@ -120,7 +120,7 @@ function guardBuilder<T extends object>(builder: T, scope: TenantScope, rootPred
         return (joined: MySqlTable, on: SQL) => {
           // The joined table is constrained in the ON clause, so a permissive join predicate
           // cannot pull in another school's rows.
-          value.call(target, joined, on); // DELIBERATE CI VERIFICATION BREAK - reverted in the next commit
+          value.call(target, joined, and(on, tenantPredicate(joined, scope)));
           return proxy;
         };
       }

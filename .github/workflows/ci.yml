@@ -29,7 +29,7 @@ jobs:
           --health-start-period=30s
 
     env:
-      DATABASE_URL: mysql://root:readerleader@127.0.0.1:3306/readerleader
+      # DELIBERATE CI VERIFICATION BREAK - DATABASE_URL removed, reverted in the next commit
       # demoAuth.test.ts fails on empty input, so these must be set even though they are
       # local-demo credentials with no production meaning.
       READER_LEADER_CHILD_DEMO_PASSWORD: ci-child-demo
@@ -65,10 +65,16 @@ jobs:
           exit 1
 
       - name: Apply migrations
+        # Kept pointed at the database on purpose for this experiment, so the job reaches the
+        # test step and the SKIP GUARD is what fails, not the migration.
+        env:
+          DATABASE_URL: mysql://root:readerleader@127.0.0.1:3306/readerleader
         run: pnpm drizzle-kit migrate
 
       - name: Test
-        run: pnpm vitest run --reporter=json --outputFile=vitest-report.json
+        # Two reporters on purpose: the default one so a failure names the tests in the log,
+        # the JSON one so the guard below can count what actually ran.
+        run: pnpm vitest run --reporter=default --reporter=json --outputFile.json=vitest-report.json
 
       # A skipped suite must turn CI red. This also asserts a floor on the collected count,
       # because a collection failure reports zero skipped and would otherwise pass.

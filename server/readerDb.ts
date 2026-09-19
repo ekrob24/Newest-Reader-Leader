@@ -53,7 +53,7 @@ export const DEFAULT_WORD_PROVENANCE: ReadingWordProvenance = {
   providerVersion: "1.0.0",
   policyVersion: "2026-09-19",
 };
-import { analyseReadingText } from "./reader";
+import { analyseReadingText, buildInterventions } from "./reader";
 
 export type AuthenticatedReader = { id: number; role: AccountRole };
 
@@ -768,6 +768,31 @@ export async function getParentDashboard(scope: TenantScope, parentUserId: numbe
 }
 
 /** Creates a clearly labelled cohort only when an administrator requests it from the dashboard. */
+/**
+ * Every demo reading is derived from its own passage, transcript and reading time by the same
+ * analyser the live path uses.
+ *
+ * The seeds used to carry hand-written figures, and they were not merely approximate: the
+ * "Lantern in the Garden" row claimed 108 words correct per minute over 72 seconds against a
+ * ten-word transcript, which is 130 words the child never said. Every seeded row was
+ * arithmetically impossible against its own transcript, including the three monthly-assessment
+ * rows behind the progress trend a teacher is shown. Only the reading time is chosen here,
+ * because for a demo it has to be; everything else is computed from it.
+ */
+function demoReading(input: { expectedText: string; transcript: string; durationSeconds: number; mode?: AssessmentMode; languageSupport?: ReadingLanguageSupport }) {
+  const analysis = analyseReadingText(input.expectedText, input.transcript, input.durationSeconds, input.mode ?? "ASSISTED_PRACTICE", undefined, input.languageSupport ?? "STANDARD_ENGLISH");
+  return {
+    transcript: analysis.transcript,
+    accuracy: analysis.accuracy,
+    wordsCorrectPerMinute: analysis.pace,
+    durationSeconds: analysis.durationSeconds,
+    assessmentMode: analysis.mode,
+    practiceWords: analysis.practiceWords,
+    wordStates: analysis.wordStates,
+    interventions: buildInterventions(analysis.events),
+  };
+}
+
 export async function seedDemoCohort(scope: TenantScope, adminUserId: number) {
   const db = await scopedDb(scope);
   const ensureUser = async (openId: string, name: string, role: "child" | "parent") => {
@@ -806,8 +831,16 @@ export async function seedDemoCohort(scope: TenantScope, adminUserId: number) {
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, amina.id)).limit(1);
   if (!existingSession) {
     await db.insert(readingSessions).values([
-      { id: newSessionId(), childProfileId: amina.id, storyTitle: "The Moonlight Kite", transcript: "Mina found a bright kite caught in the tall grass.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 92, completed: 1, practiceWords: ["glimmered", "gentle"], interventions: [{ word: "glimmered", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] },
-      { id: newSessionId(), childProfileId: leo.id, storyTitle: "Rainy-Day Robot", transcript: "Rain tapped on Zuri's window all afternoon.", accuracy: 95, wordsCorrectPerMinute: 116, durationSeconds: 84, completed: 1, practiceWords: ["afternoon"], interventions: [], wordStates: [] },
+      { id: newSessionId(), childProfileId: amina.id, storyTitle: "The Moonlight Kite", completed: 1, wordTimings: [], ...demoReading({
+        expectedText: 'Mina found a bright kite caught in the tall grass behind the school. It glimmered in the gentle evening light while the wind pulled softly at the string. She untangled it slowly, then ran along the field until the kite lifted above the hedgerow and steadied itself against the sky.',
+        transcript: 'Mina found a bright kite caught in the tall grass behind the school. It shimmered in the gentle evening light while the wind pulled softly at the string. She untangled it slowly, then ran along the field until the kite lifted above the hedgerow and steady itself against the sky.',
+        durationSeconds: 31,
+      }) },
+      { id: newSessionId(), childProfileId: leo.id, storyTitle: "Rainy-Day Robot", completed: 1, wordTimings: [], ...demoReading({
+        expectedText: "Rain tapped on Zuri's window all afternoon while the little robot waited quietly by the door. It counted every drop that slid down the glass and hummed a small tune to itself. When the clouds finally thinned, the robot opened the door and stepped into the bright wet garden.",
+        transcript: "Rain tapped on Zuri's window all afternoon while the little robot waited quietly by the door. It counted every drop that slid down the glass and hummed a small tune to itself. When the clouds finally thinned, the robot opened the door and stepped into the bright wet garden.",
+        durationSeconds: 26,
+      }) },
     ]);
   }
   return { readerClass, childProfiles: [amina, leo], demoParentOpenId: parentUser.openId };
@@ -858,29 +891,40 @@ export async function provisionLocalDemoCohort() {
   await db.update(readingMaterials).set({ status: "assigned" }).where(eq(readingMaterials.id, material.id));
   await db.insert(materialAssignments).values({ classId: readerClass.id, materialId: material.id }).onDuplicateKeyUpdate({ set: { materialId: material.id } });
   const [existingSession] = await db.select({ id: readingSessions.id }).from(readingSessions).where(eq(readingSessions.childProfileId, profile.id)).limit(1);
-  if (!existingSession) await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", transcript: "Amina carried a little lantern into the garden at dusk.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 72, completed: 1, practiceWords: ["lantern", "hedgehog"], interventions: [{ word: "hedgehog", action: "teacher_review", note: "Possible pronunciation variation — the coach stayed silent for teacher review." }], wordStates: [] });
+  if (!existingSession) await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "The Lantern in the Garden", completed: 1, wordTimings: [], ...demoReading({
+    // The passage the learner was actually assigned, read at a believable pace for the level.
+    expectedText: material.sourceText,
+    transcript: 'Amina carried a little lantern into the garden at dusk. The light made golden circles on the path. Near the tall gate, she saw a hedghog sniffing beside the flowers. Amina stood very still, then watched it hurry safely under the hedge.',
+    durationSeconds: 27,
+    languageSupport: "IRISH_ENGLISH_SUPPORT",
+  }) });
   const accentShowcaseTitle = "Accent Showcase — The Thin Path";
   const [accentShowcaseSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, accentShowcaseTitle))).limit(1);
   if (!accentShowcaseSeed) {
     const expectedText = "The thin path was caught";
     const transcript = "The tin pat was cot";
-    const durationSeconds = 30;
-    const analysis = analyseReadingText(expectedText, transcript, durationSeconds, "ASSISTED_PRACTICE", undefined, "IRISH_ENGLISH_SUPPORT");
-    const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved audio." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
-    await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, storyTitle: accentShowcaseTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, completed: 1, assessmentMode: analysis.mode, languageSupport: "IRISH_ENGLISH_SUPPORT", practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates });
+    // Five words. This fixture exists to show the Irish English dialect flag, not fluency, and
+    // at four seconds it is exactly the short sample paceReliable is there to mark.
+    const durationSeconds = 4;
+    await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, storyTitle: accentShowcaseTitle, completed: 1, languageSupport: "IRISH_ENGLISH_SUPPORT", wordTimings: [], ...demoReading({ expectedText, transcript, durationSeconds, languageSupport: "IRISH_ENGLISH_SUPPORT" }) });
   }
+  // One passage across three months, so the trend is a reading that improved rather than
+  // three numbers chosen to slope upwards.
+  const gardenWalkPassage = 'Amina followed the winding path through the garden and counted seven small stones beside the quiet pond. A blackbird watched her from the wall while the morning light moved slowly across the grass. She wrote each number in her notebook, then walked back along the hedge to tell her teacher what she had found.';
   const [historicalTrendSeed] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Garden Walk · June"))).limit(1);
   if (!historicalTrendSeed) await db.insert(readingSessions).values([
-    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", transcript: "Amina followed the path through the garden.", accuracy: 82, wordsCorrectPerMinute: 88, durationSeconds: 95, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["followed"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z") },
-    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", transcript: "Amina followed the path through the quiet garden.", accuracy: 87, wordsCorrectPerMinute: 96, durationSeconds: 91, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["quiet"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z") },
-    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", transcript: "Amina followed the bright garden path with confidence.", accuracy: 92, wordsCorrectPerMinute: 104, durationSeconds: 85, completed: 1, assessmentMode: "MONTHLY_ASSESSMENT", practiceWords: ["confidence"], interventions: [], wordStates: [], wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z") },
+    // A rising trend has to come from rising readings, not from three rising numbers: the
+    // same passage, read with fewer slips and in less time each month.
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · June", completed: 1, wordTimings: [], createdAt: new Date("2026-06-03T10:00:00Z"), ...demoReading({ expectedText: gardenWalkPassage, transcript: 'Amina followed the path through the garden and counted seven small stones beside the quiet pond. A black bird watched her from the wall while the morning light moved across the grass. She wrote each number in her note book, then walked back along the hedge to tell her teacher what she had found.', durationSeconds: 43, mode: "MONTHLY_ASSESSMENT" }) },
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · July", completed: 1, wordTimings: [], createdAt: new Date("2026-07-03T10:00:00Z"), ...demoReading({ expectedText: gardenWalkPassage, transcript: 'Amina followed the winding path through the garden and counted seven small stones beside the quiet pond. A black bird watched her from the wall while the morning light moved slowly across the grass. She wrote each number in her notebook, then walked back along the hedge to tell her teacher what she had found.', durationSeconds: 38, mode: "MONTHLY_ASSESSMENT" }) },
+    { id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Garden Walk · August", completed: 1, wordTimings: [], createdAt: new Date("2026-08-03T10:00:00Z"), ...demoReading({ expectedText: gardenWalkPassage, transcript: gardenWalkPassage, durationSeconds: 33, mode: "MONTHLY_ASSESSMENT" }) },
   ]);
   const storageConfigured = Boolean(process.env.BUILT_IN_FORGE_API_URL && process.env.BUILT_IN_FORGE_API_KEY);
   if (storageConfigured) {
     const [playbackFixture] = await db.select({ id: readingSessions.id }).from(readingSessions).where(and(eq(readingSessions.childProfileId, profile.id), eq(readingSessions.storyTitle, "Word-linked playback technical check"))).limit(1);
     if (!playbackFixture) {
       const audio = await storagePut("demo-playback/word-timing-check.wav", createDemoPlaybackTone(), "audio/wav");
-      await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", transcript: "Amina reads steadily", accuracy: 100, wordsCorrectPerMinute: 100, durationSeconds: 3, audioStorageKey: audio.key, completed: 1, assessmentMode: "ASSISTED_PRACTICE", practiceWords: [], interventions: [], wordStates: [], wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
+      await db.insert(readingSessions).values({ id: newSessionId(), childProfileId: profile.id, materialId: material.id, storyTitle: "Word-linked playback technical check", audioStorageKey: audio.key, audioStatus: "stored", completed: 1, ...demoReading({ expectedText: "Amina reads steadily", transcript: "Amina reads steadily", durationSeconds: 3 }), wordTimings: [{ id: "spoken-0", text: "Amina", startMs: 0, endMs: 1000 }, { id: "spoken-1", text: "reads", startMs: 1000, endMs: 2000 }, { id: "spoken-2", text: "steadily", startMs: 2000, endMs: 3000 }] });
     }
   }
   const [existingQuizAttempt] = await db.select({ id: quizAttempts.id }).from(quizAttempts).where(and(eq(quizAttempts.childProfileId, profile.id), eq(quizAttempts.materialId, material.id))).limit(1);

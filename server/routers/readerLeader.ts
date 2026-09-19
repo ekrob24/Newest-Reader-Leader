@@ -6,7 +6,7 @@ import { scopeForUser } from "../tenantScope";
 import { isSessionId } from "../../shared/sessionId";
 import { audioAbsenceSummary } from "../../shared/audioRetention";
 import { getAccentFairnessSummary } from "../accentMetrics";
-import { analyseReadingText } from "../reader";
+import { analyseReadingText, buildInterventions } from "../reader";
 import { assertSafeExerciseSet } from "../exerciseSafety";
 import { buildExerciseGenerationRequest } from "../exercisePrompt";
 import { extractReadingMaterial } from "../documentExtraction";
@@ -290,7 +290,7 @@ export const readerLeaderRouter = router({
       const transcript = transcription?.text || input.fallbackTranscript.trim();
       if (!transcript) throw new TRPCError({ code: "BAD_REQUEST", message: "Read a few words before finishing so Reader Leader can prepare a report." });
       const analysis = analyseReadingText(input.expectedText, transcript, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport, irishVariantContext.variants);
-      const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => ({ word: event.expectedWord, eventType: event.eventType, heardWord: event.recognisedWord ?? undefined, provisionalIrishEnglish: event.provisionalIrishEnglish, action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const, note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved reading record." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : "Try that word again when you are ready." }));
+      const interventions = buildInterventions(analysis.events);
       const wordTimings = buildWordTimings(transcript, analysis.durationSeconds, transcription?.segments);
       const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey, audioStatus, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
@@ -315,21 +315,7 @@ export const readerLeaderRouter = router({
       if (!allowed || ctx.user.role !== "child") throw new TRPCError({ code: "FORBIDDEN", message: "Only the signed-in child can save this reading session." });
       const [learnerSettings, irishVariantContext] = await Promise.all([getLearnerReadingSettings(tenantScope(ctx), input.childProfileId), getIrishVariantContextForChild(tenantScope(ctx), input.childProfileId)]);
       const analysis = analyseReadingText(input.expectedText, input.transcript, input.durationSeconds, input.assessmentMode, input.wordStates, learnerSettings.languageSupport, irishVariantContext.variants);
-      const interventions = analysis.events.filter(event => event.eventType !== "correct").slice(0, 5).map(event => {
-        const action: "prompt" | "model" | "stay_silent" | "teacher_review" = event.action === "teacher_review"
-          ? "teacher_review"
-          : event.action === "stay_silent"
-            ? "stay_silent"
-            : "prompt";
-        return {
-          word: event.expectedWord,
-          eventType: event.eventType,
-          heardWord: event.recognisedWord ?? undefined,
-          provisionalIrishEnglish: event.provisionalIrishEnglish,
-          action,
-          note: event.eventType === "dialect_variation" ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved reading record." : event.action === "teacher_review" ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent." : event.action === "practise_gently" ? "Try that word again when you are ready." : "Reading event noted without interruption.",
-        };
-      });
+      const interventions = buildInterventions(analysis.events);
       const wordTimings = buildWordTimings(analysis.transcript, analysis.durationSeconds);
       const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions: [...input.demoInterventions, ...interventions], wordStates: analysis.wordStates, wordTimings });
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });

@@ -86,5 +86,24 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
   return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: recordedDuration, paceReliable: isPaceMeaningful(recordedDuration), practiceWords, events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
 }
 
+/** The saved-intervention shape, built from analyser events. Both save paths and the demo
+ *  seeders share it, so a seeded reading cannot show a flag the product would not produce. */
+export type BuiltIntervention = { word: string; eventType: ReadingEventKind; heardWord?: string; provisionalIrishEnglish?: boolean; action: "prompt" | "stay_silent" | "teacher_review"; note: string };
+
+export function buildInterventions(events: ReadingEvent[], limit = 5): BuiltIntervention[] {
+  return events.filter(event => event.eventType !== "correct").slice(0, limit).map(event => ({
+    word: event.expectedWord,
+    eventType: event.eventType,
+    heardWord: event.recognisedWord ?? undefined,
+    provisionalIrishEnglish: event.provisionalIrishEnglish,
+    action: event.action === "teacher_review" ? "teacher_review" as const : event.action === "stay_silent" ? "stay_silent" as const : "prompt" as const,
+    note: event.eventType === "dialect_variation"
+      ? "Irish English variation provisionally accepted — please confirm this reading moment from the saved reading record."
+      : event.action === "teacher_review"
+        ? "Possible pronunciation variation — flagged for teacher review. The coach stayed silent."
+        : "Try that word again when you are ready.",
+  }));
+}
+
 export type ReaderRole = "child" | "teacher" | "parent";
 export function mayViewChildProgress(viewer: ReaderRole, profileId: string, linkedProfileIds: string[]): boolean { return viewer === "teacher" || linkedProfileIds.includes(profileId); }

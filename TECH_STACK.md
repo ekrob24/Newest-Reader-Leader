@@ -319,6 +319,7 @@ ten-word transcript. Now only the reading time is chosen; everything else is com
 | | |
 | --- | --- |
 | `RUNNING_LOCALLY.md` | Getting it running, and what to test |
+| `DATA_MODEL.md` | The tables as a diagram, how each model is used, and the two lexicons |
 | `DEMO_RUNBOOK.md` | The demo journey, step by step, including the no-microphone fallback |
 | `ENGINE_PROPOSAL.md` | The speech-engine evaluation, the open findings, and what is built but not live |
 | `DEPLOY_PREVIEW.md` | Standing up a preview instance |

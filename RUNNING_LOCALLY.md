@@ -10,7 +10,8 @@ with synthetic demo data, with three sign-ins — a child, a teacher and a paren
 
 > For the scripted demo journey — what to click, in what order, and the figures that should
 > appear — see **`DEMO_RUNBOOK.md`**. This file is about getting it running and testing it.
-> For what the pieces are and why, see **`TECH_STACK.md`**.
+> For what the pieces are and why, see **`TECH_STACK.md`**; for the tables, the models and
+> the lexicons, see **`DATA_MODEL.md`**.
 
 ---
 

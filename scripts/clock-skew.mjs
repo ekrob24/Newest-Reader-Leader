@@ -95,11 +95,29 @@ export async function measureClocks(url, now = () => Date.now()) {
   }
 }
 
-/** The one number that decides it: the gap every sampled row agrees on, or null. */
+/**
+ * A day. Beyond this a row was dated on purpose, not by a clock going wrong.
+ *
+ * The seeded monthly-assessment rows are backdated by months so a teacher has a trend to look
+ * at, so their createdAt is nowhere near the instant their id was minted and never should be.
+ * Reporting those as anomalies is crying wolf, which is how a diagnostic stops being read.
+ */
+const DELIBERATELY_DATED_MINUTES = 24 * 60;
+
+export function splitSamples(samples) {
+  const all = samples ?? [];
+  return {
+    written: all.filter(sample => Math.abs(sample.gapMinutes) < DELIBERATELY_DATED_MINUTES),
+    deliberatelyDated: all.filter(sample => Math.abs(sample.gapMinutes) >= DELIBERATELY_DATED_MINUTES),
+  };
+}
+
+/** The one number that decides it: the gap every row written at its own moment agrees on. */
 export function columnSkewMinutes(samples) {
-  if (!samples?.length) return null;
-  const first = samples[0].gapMinutes;
-  return samples.every(sample => sample.gapMinutes === first) ? first : null;
+  const { written } = splitSamples(samples);
+  if (!written.length) return null;
+  const first = written[0].gapMinutes;
+  return written.every(sample => sample.gapMinutes === first) ? first : null;
 }
 
 /**
@@ -120,8 +138,10 @@ export function clockReport(measurement, { machineTz, offsetHours }) {
     `THE FUNCTION: NOW(), read back, is ${describe(functionSkewMinutes)} this machine's clock.`,
   ];
 
-  if (!samples?.length) {
-    lines.push("THE COLUMN  : no saved readings to measure. Run the gate first, then this.");
+  const { written, deliberatelyDated } = splitSamples(samples);
+  const dated = deliberatelyDated.length ? ` (${deliberatelyDated.length} more were dated on purpose and are not measured)` : "";
+  if (!written.length) {
+    lines.push(`THE COLUMN  : no readings written at their own moment to measure${dated}. Run the gate first, then this.`);
     lines.push("");
     lines.push("Without the column measurement this says nothing about the failing assertion.");
     return lines;
@@ -129,8 +149,8 @@ export function clockReport(measurement, { machineTz, offsetHours }) {
   if (column === null) {
     // Show the rows that are out, not the first few rows. A timezone moves every row together;
     // a handful out among many is a different fault and the offenders are the evidence.
-    const offenders = samples.filter(sample => Math.abs(sample.gapMinutes) > 1);
-    lines.push(`THE COLUMN  : ${samples.length} rows sampled; ${offenders.length} of them are out, the rest are exact.`);
+    const offenders = written.filter(sample => Math.abs(sample.gapMinutes) > 1);
+    lines.push(`THE COLUMN  : ${written.length} rows measured${dated}; ${offenders.length} of them are out, the rest are exact.`);
     for (const sample of offenders.slice(0, 8)) {
       lines.push(`    ${sample.gapMinutes >= 0 ? "+" : ""}${sample.gapMinutes} min  ${sample.id}`);
       lines.push(`        createdAt ${sample.createdAt}  id minted ${sample.minted}  source ${sample.capturedAtSource}${sample.hasDeviceClock ? " (device clock recorded)" : ""}`);
@@ -140,7 +160,7 @@ export function clockReport(measurement, { machineTz, offsetHours }) {
     lines.push("every row together. Whatever those rows have in common is the cause.");
     return lines;
   }
-  lines.push(`THE COLUMN  : createdAt is ${describe(column)} the instant each row's own id was minted, across all ${samples.length} sampled rows.`);
+  lines.push(`THE COLUMN  : createdAt is ${describe(column)} the instant each row's own id was minted, across all ${written.length} measured rows${dated}.`);
   lines.push("");
   if (Math.abs(column) <= 1 && Math.abs(functionSkewMinutes ?? 0) <= 1) {
     lines.push("Neither is skewed. The failing assertion has some cause that is not the clock");

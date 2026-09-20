@@ -466,10 +466,26 @@ export async function saveReadingSession(scope: TenantScope, input: {
   // The session carries its own identity from the moment of capture, so the row can be read
   // back by that id instead of guessing at "the most recent row for this child".
   const id = newSessionId();
-  const capture = resolveCaptureTime(capturedAt, new Date());
+  /**
+   * One clock reading, used for every decision this function makes and written to the row.
+   *
+   * createdAt used to be left to MySQL's `DEFAULT (now())`, and on a machine whose timezone is
+   * not UTC that value comes back an hour out. Measured on the same row, same insert: the
+   * server recorded the reading at 19:52:51.444Z, capturedAt - a Date this code wrote - read
+   * back correct to 444ms, and createdAt read back as 20:52:51.000Z. The database had returned
+   * the local wall clock and it was taken for UTC. Nothing here can be sure which layer does
+   * that, and it does not need to be: a Date written by this code round-trips correctly, as
+   * capturedAt on that very row proves, so this writes one.
+   *
+   * It is also the more honest record. resolveCaptureTime judges the device's clock against
+   * this instant, and the id is minted from it a line earlier, so the row now agrees with
+   * itself rather than carrying a second clock nothing else in it has seen.
+   */
+  const recordedAt = new Date();
+  const capture = resolveCaptureTime(capturedAt, recordedAt);
   const wordStates = input.wordStates ?? [];
   const wordTimings = input.wordTimings ?? [];
-  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, audioStatus: input.audioStatus ?? (input.audioStorageKey ? "stored" : "not_captured"), assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", practiceWords: [], wordStates, wordTimings, completed: 1 });
+  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, audioStatus: input.audioStatus ?? (input.audioStorageKey ? "stored" : "not_captured"), assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", practiceWords: [], wordStates, wordTimings, completed: 1, createdAt: recordedAt });
 
   // One row per word, from the same evidence as the JSON columns above. Additive: the JSON
   // stays the source of truth until everything downstream reads the table.

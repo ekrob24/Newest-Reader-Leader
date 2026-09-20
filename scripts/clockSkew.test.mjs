@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockReport, columnSkewMinutes, ulidTime } from "./clock-skew.mjs";
+import { clockReport, columnSkewMinutes, splitSamples, ulidTime } from "./clock-skew.mjs";
 import { createSessionIdFactory, newSessionId, sessionIdTime } from "../shared/sessionId";
 
 /**
@@ -42,6 +42,20 @@ describe("agreeing on one column gap", () => {
     expect(columnSkewMinutes(rows(60, 0))).toBeNull();
     expect(columnSkewMinutes(rows(60, 60, 59))).toBeNull();
   });
+  it("leaves the deliberately backdated seed rows out of the measurement", () => {
+    // The monthly-assessment rows are dated months back on purpose so a teacher has a trend.
+    // Counting them as anomalies is how a diagnostic stops being read.
+    const backdated = { id: "seeded", gapMinutes: -69773, createdAt: "t", minted: "t", capturedAtSource: "server", hasDeviceClock: false };
+    const split = splitSamples([...rows(0, 0), backdated]);
+    expect(split.written).toHaveLength(2);
+    expect(split.deliberatelyDated).toEqual([backdated]);
+    expect(columnSkewMinutes([...rows(0, 0), backdated])).toBe(0);
+    const out = clockReport({ globalTz: "SYSTEM", sessionTz: "SYSTEM", systemTz: "GMT Summer Time", functionSkewMinutes: 0, samples: [...rows(0, 0), backdated] }, view).join("\n");
+    expect(out).toContain("across all 2 measured rows (1 more were dated on purpose and are not measured)");
+    expect(out).toContain("Neither is skewed.");
+    expect(out).not.toContain("-69773");
+  });
+
   it("returns null when there is nothing to measure", () => {
     expect(columnSkewMinutes([])).toBeNull();
     expect(columnSkewMinutes(undefined)).toBeNull();
@@ -74,7 +88,7 @@ describe("what the reading says", () => {
       { id: "B", gapMinutes: 0, createdAt: "t", minted: "t", capturedAtSource: "device", hasDeviceClock: true },
     ];
     const out = read({ samples });
-    expect(out).toContain("3 rows sampled; 1 of them are out, the rest are exact");
+    expect(out).toContain("3 rows measured; 1 of them are out, the rest are exact");
     expect(out).toContain("+60 min  OUT");
     expect(out).toContain("device clock recorded");
     // The row that is fine must not be listed as evidence.
@@ -84,7 +98,7 @@ describe("what the reading says", () => {
 
   it("says it measured nothing when there are no saved readings, rather than no skew", () => {
     const out = read({ samples: [] });
-    expect(out).toContain("no saved readings to measure");
+    expect(out).toContain("no readings written at their own moment to measure");
     expect(out).toContain("says nothing about the failing assertion");
     expect(out).not.toContain("Neither is skewed");
   });

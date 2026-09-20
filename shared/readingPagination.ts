@@ -1,4 +1,4 @@
-import type { LiveWordState } from "./liveWordStates";
+import { READING_WORD_PATTERN, type LiveWordState } from "./liveWordStates";
 
 export type ReadingPage = {
   startWordIndex: number;
@@ -6,11 +6,34 @@ export type ReadingPage = {
   tokens: string[];
 };
 
-const tokenPattern = /\S+\s*/g;
+/**
+ * One display string per word, cut on word boundaries.
+ *
+ * A page's startWordIndex and endWordIndex index the word states, so the tokens on a page
+ * have to be the same things the word states are, in the same order. Splitting on whitespace
+ * is not: it makes "well-known" one token where the matcher sees two words, and "100" a token
+ * where the matcher sees none, and from the first such token onwards the reading view
+ * highlights the wrong word and the error grows with the passage.
+ *
+ * Each token runs from the start of its word to the start of the next, so punctuation,
+ * numbers, dashes and spacing stay attached to the word before them and nothing is lost from
+ * what the child reads. Anything before the first word joins the first token.
+ */
+function displayTokensByWord(text: string): string[] {
+  const matches: { index: number }[] = [];
+  const scan = new RegExp(READING_WORD_PATTERN.source, "g");
+  for (let match = scan.exec(text); match !== null; match = scan.exec(text)) matches.push({ index: match.index });
+  if (!matches.length) return [];
+  return matches.map((match, index) => {
+    const from = index === 0 ? 0 : match.index;
+    const to = index === matches.length - 1 ? text.length : matches[index + 1].index;
+    return text.slice(from, to);
+  });
+}
 
 /** Splits a story into readable page-sized segments while favouring sentence boundaries. */
 export function createReadingPages(text: string, maxWordsPerPage = 42): ReadingPage[] {
-  const tokens = text.match(tokenPattern) ?? [];
+  const tokens = displayTokensByWord(text);
   if (!tokens.length) return [{ startWordIndex: 0, endWordIndex: -1, tokens: [] }];
 
   const pages: ReadingPage[] = [];

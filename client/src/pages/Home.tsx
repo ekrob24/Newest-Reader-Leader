@@ -8,7 +8,7 @@ import { TeacherDashboard } from "@/components/TeacherDashboard";
 import { ParentDashboard } from "@/components/ParentDashboard";
 import { trpc } from "@/lib/trpc";
 import type { MaterialRightsSource } from "../../../drizzle/schema";
-import { advanceReadingPosition, deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead, liveReadingPosition, readerWordClass, type LiveWordState } from "@shared/liveWordStates";
+import { advanceReadingPosition, deriveLiveReading, deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead, READING_WORD_PATTERN, readerWordClass, type LiveWordState } from "@shared/liveWordStates";
 import kiteArtwork from "../assets/story-art/kite.webp";
 import lanternArtwork from "../assets/story-art/lantern.webp";
 import plantArtwork from "../assets/story-art/plant.webp";
@@ -49,13 +49,22 @@ const stories: Story[] = [
   { id: "robot", title: "Rainy-Day Robot", level: "Level 4 · Red Circle", focus: "Pace & punctuation", duration: "5 min read", description: "Zuri and a helpful robot invent a new way to brighten a wet afternoon.", art: "robot", color: "#ffdcd4", accent: "#e64b38", text: "Rain tapped on Zuri's window all afternoon. Her little robot, Bolt, rolled across the table and flashed a blue light. Together they built a tiny boat from a cereal box. They sailed it through puddles in the garden until the grey clouds opened and a rainbow appeared." },
 ];
 const fallbackTranscripts: Record<string, string> = { kite: "Mina found a bright kite caught in the tall grass. Its silver tail glimmered in the moonlight. She lifted the string and the kite rose over the quiet field. A gentle wind carried it higher, and Mina laughed as it danced among the stars.", seed: "Ben planted a small seed beside the school gate. Every morning he brought a cup of water and whispered a cheerful hello. On Friday a green shoot pushed through the soil.", robot: "Rain tapped on Zuri's window all afternoon. Her little robot Bolt rolled across the table and flashed a blue light. Together they built a tiny boat from a cereal box." };
-const wordPattern = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
-const words = (text: string) => text.match(wordPattern) ?? [];
+const words = (text: string) => text.match(READING_WORD_PATTERN) ?? [];
 
 function createGuidedReport(story: Story, transcript: string, durationSeconds: number, mode: AssessmentMode, wordStates: WordState[]): Report {
   const expected = words(story.text).map(word => word.toLowerCase());
-  const heard = words(transcript).map(word => word.toLowerCase());
-  const correctWords = expected.filter((word, index) => heard[index] === word).length;
+  /**
+   * Counted from the word states the matcher produced, not by comparing positions.
+   *
+   * This line was `expected.filter((word, index) => heard[index] === word).length` - strict
+   * positional equality, so one word the recogniser dropped put every word after it against
+   * the wrong expected word. That is precisely the failure deriveLiveWordStates documents at
+   * length and solves with bounded re-anchoring; the live matcher was fixed and this scorer
+   * was not. Measured on "Rainy-Day Robot" with one unstressed "a" dropped: the matcher says
+   * 29 of 30, this said 17, and 57% is what went into the saved record while the child's
+   * screen showed her she had read it. There is one alignment implementation now.
+   */
+  const correctWords = wordStates.filter(state => state.status === "correct" || state.status === "retried_correct").length;
   const retrySummary = mode === "MONTHLY_ASSESSMENT" ? [] : wordStates.filter(state => state.attempts > 1).map(state => ({ word: state.text, retries: state.attempts - 1 }));
   const selfCorrections = mode === "MONTHLY_ASSESSMENT" ? [] : wordStates.filter(state => state.status === "retried_correct").map(state => state.text);
   const safeDuration = Math.max(durationSeconds, 1);
@@ -130,6 +139,8 @@ export default function Home() {
   const transcriptFrameRef = useRef<number | null>(null);
   const pendingTranscriptRef = useRef("");
   const liveTranscriptRef = useRef("");
+  /** Interim speech rescued from a stopping recogniser. Part of the record, never of judgement. */
+  const committedInterimRef = useRef("");
   const lastRecognitionAtRef = useRef(0);
   const restartTimerRef = useRef<number | null>(null);
   const recognitionFailuresRef = useRef(0);
@@ -224,10 +235,10 @@ export default function Home() {
   // untouched: it still sees only what the recogniser has settled, which is what stopped the
   // green-red-green flicker. Nothing here writes a status, and the cursor never goes back.
   useEffect(() => {
-    const heard = `${liveTranscript} ${interimTranscript}`.replace(/\s+/g, " ").trim();
+    const heard = `${liveTranscript} ${committedInterimRef.current} ${interimTranscript}`.replace(/\s+/g, " ").trim();
     if (!heard) return setPositionIndex(0);
-    const reached = liveReadingPosition(deriveLiveWordStates(selectedStory.text, heard, assessmentMode, languageSupport, educatorApprovedVariants, movedOnAttempts));
-    setPositionIndex(previous => advanceReadingPosition(previous, reached));
+    const { position } = deriveLiveReading(selectedStory.text, heard, assessmentMode, languageSupport, educatorApprovedVariants, movedOnAttempts);
+    setPositionIndex(previous => advanceReadingPosition(previous, position));
   }, [assessmentMode, educatorApprovedVariants, interimTranscript, languageSupport, liveTranscript, movedOnAttempts, selectedStory.text]);
 
   useEffect(() => {
@@ -340,7 +351,7 @@ export default function Home() {
   });
 
   function resetWordStates(story: Story) { guidedModelledWordsRef.current.clear(); setMovedOnAttempts(new Map()); setPositionIndex(0); setWordStates(initialLiveWordStates(story.text)); }
-  function clearLiveTranscript() { liveTranscriptRef.current = ""; pendingTranscriptRef.current = ""; setLiveTranscript(""); setInterimTranscript(""); }
+  function clearLiveTranscript() { liveTranscriptRef.current = ""; committedInterimRef.current = ""; pendingTranscriptRef.current = ""; setLiveTranscript(""); setInterimTranscript(""); }
   function launchStory(story: Story) { setSelectedStory(story); clearLiveTranscript(); setReport(null); setSavedSessionId(null); setHasSavedRecording(false); setModelSpeaking(false); setCoachMoment("idle"); setHesitationHint(false); setAssessmentMode(childProgress.data?.learnerSettings?.defaultReadingMode || "ASSISTED_PRACTICE"); resetWordStates(story); setReadingState("ready"); setRecognitionStatus("ready"); setView("reading"); }
   function chooseStory(story: Story) { setWarmUpStory(story); }
   function selectAssessmentMode(mode: AssessmentMode) { setAssessmentMode(mode); clearLiveTranscript(); setCoachMoment("idle"); resetWordStates(selectedStory); }
@@ -388,29 +399,60 @@ export default function Home() {
    * speech was still spoken. Dropping it produced a saved reading with no transcript at all,
    * scored 0%.
    */
+  /**
+   * What the child said, for the record. Finals, plus interim speech a stopping recogniser
+   * would otherwise have thrown away, plus whatever interim is in flight right now.
+   *
+   * Kept apart from `liveTranscript`, which is finals only and is what judgement is derived
+   * from. Folding unsettled speech into that stream - which is what committing an interim used
+   * to do, on every recogniser restart, and restarts are frequent - scores words the
+   * recogniser has not settled and is a route straight back to the green-red-green flicker the
+   * finals-only rule exists to prevent. The requirement underneath is real: a stopped
+   * recogniser discards unsettled speech, and dropping it produced empty transcripts scored at
+   * nought. But that requirement is about the saved record, not about the colours.
+   */
   function spokenTranscript() {
-    return `${liveTranscriptRef.current} ${interimTranscriptRef.current}`.replace(/\s+/g, " ").trim();
+    return `${liveTranscriptRef.current} ${committedInterimRef.current} ${interimTranscriptRef.current}`.replace(/\s+/g, " ").trim();
   }
-  /** Fold unsettled speech into the record before a recogniser is replaced or stopped. */
+  /** Fold unsettled speech into the record - and only into the record - before a recogniser is
+   *  replaced or stopped. */
   function commitInterimSpeech() {
     if (!interimTranscriptRef.current) return;
-    liveTranscriptRef.current = spokenTranscript();
-    pendingTranscriptRef.current = liveTranscriptRef.current;
-    setLiveTranscript(liveTranscriptRef.current);
+    committedInterimRef.current = `${committedInterimRef.current} ${interimTranscriptRef.current}`.replace(/\s+/g, " ").trim();
     interimTranscriptRef.current = "";
     setInterimTranscript("");
+  }
+  /**
+   * Credit an open pause before anyone reads the clock. Idempotent.
+   *
+   * Pausing recorded the moment and only the resume branch credited it, so a reading paused
+   * and then finished - pause, walk away, come back, Finish story - carried the whole idle
+   * period as reading time. Live data showed a 2,040-second session among reads of 26 to 92
+   * seconds, and settledWordsCorrectPerMinute divides by exactly that number, so a teacher
+   * who reviewed it would have been shown a pace built on an invented duration.
+   */
+  function settleElapsed() {
+    if (wasPausedRef.current === 0) return;
+    pausedDurationRef.current += Date.now() - wasPausedRef.current;
+    wasPausedRef.current = 0;
+  }
+  /** Reading time in seconds, or null when there is no start to measure from. */
+  function elapsedSeconds(): number | null {
+    settleElapsed();
+    if (startedAtRef.current <= 0) return null;
+    return Math.max(0, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000));
   }
   function hasReadingEvidence() { return hasChildReadingEvidence(spokenTranscript(), wordStates); }
   function finishWithGuidedTranscript({ persist = true }: { persist?: boolean } = {}) {
     if (!hasReadingEvidence()) { setReadingState("ready"); setRecognitionStatus("ready"); toast("Read a little before finishing so Reader Leader can make a helpful report."); return; }
-    const elapsed = startedAtRef.current > 0 ? Math.max(1, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000)) : 1;
+    const elapsed = elapsedSeconds() ?? 0;
     finishWithReport(createGuidedReport(selectedStory, spokenTranscript(), elapsed, assessmentMode, wordStates), persist);
   }
   async function sendRecording(blob: Blob) {
     // Report the reading time that actually elapsed. This used to be raised to twenty
     // seconds to clear the server's old minimum, which meant a short read was sent, stored
     // and shown to a teacher as a twenty-second one.
-    const elapsed = startedAtRef.current > 0 ? Math.max(0, Math.round((Date.now() - startedAtRef.current - pausedDurationRef.current) / 1000)) : 0;
+    const elapsed = elapsedSeconds() ?? 0;
     // No audio, or more than the server will accept. The reading still happened, so it still
     // goes to the server — as a guided save rather than being quietly dropped here.
     if (blob.size === 0 || blob.size > 4_500_000) {
@@ -553,17 +595,18 @@ export default function Home() {
       recorder.start(1000); beginRecognition(); setReadingState("listening");
     } catch { startedAtRef.current = Date.now(); setReadingState("listening"); setRecognitionStatus("unavailable"); toast("Microphone access was not granted. Guided practice remains available."); }
   }
-  function pauseOrResume() { const recorder = recorderRef.current; if (readingState === "listening") { recorder?.pause(); recognitionDesiredRef.current = false; recognitionRef.current?.stop?.(); wasPausedRef.current = Date.now(); setRecognitionStatus("paused"); return setReadingState("paused"); } if (readingState === "paused") { recorder?.resume(); pausedDurationRef.current += Date.now() - wasPausedRef.current; beginRecognition(); setReadingState("listening"); } }
-  function restartReading() { shouldCompleteRef.current = false; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); else cleanupRecording(); startedAtRef.current = 0; pausedDurationRef.current = 0; clearLiveTranscript(); setCoachMoment("idle"); setReadingState("ready"); setRecognitionStatus("ready"); toast("Fresh start. Take your time and enjoy the story."); }
+  function pauseOrResume() { const recorder = recorderRef.current; if (readingState === "listening") { recorder?.pause(); recognitionDesiredRef.current = false; recognitionRef.current?.stop?.(); wasPausedRef.current = Date.now(); setRecognitionStatus("paused"); return setReadingState("paused"); } if (readingState === "paused") { recorder?.resume(); settleElapsed(); beginRecognition(); setReadingState("listening"); } }
+  function restartReading() { shouldCompleteRef.current = false; wasPausedRef.current = 0; pausedDurationRef.current = 0; if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); else cleanupRecording(); startedAtRef.current = 0; pausedDurationRef.current = 0; clearLiveTranscript(); setCoachMoment("idle"); setReadingState("ready"); setRecognitionStatus("ready"); toast("Fresh start. Take your time and enjoy the story."); }
   function completeReading() {
     if (readingState === "processing") return;
     if (!hasReadingEvidence()) { toast("Start reading before finishing. Even a few words are enough to begin a helpful report."); return; }
     const recorder = recorderRef.current;
     if (recorder?.state === "recording") { shouldCompleteRef.current = true; recorder.stop(); return; }
     if (recorder?.state === "paused") { recorder.stop(); cleanupRecording(); }
+    settleElapsed();
     setReadingState("processing"); window.setTimeout(finishWithGuidedTranscript, 160);
   }
-  function completeGuidedSession() { shouldCompleteRef.current = false; if (!hasReadingEvidence()) { cleanupRecording(); setReadingState("ready"); setRecognitionStatus("ready"); return toast("Read a little before finishing so Reader Leader can make a helpful report."); } if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); cleanupRecording(); setRecognitionStatus("processing"); finishWithGuidedTranscript(); }
+  function completeGuidedSession() { shouldCompleteRef.current = false; settleElapsed(); if (!hasReadingEvidence()) { cleanupRecording(); setReadingState("ready"); setRecognitionStatus("ready"); return toast("Read a little before finishing so Reader Leader can make a helpful report."); } if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop(); cleanupRecording(); setRecognitionStatus("processing"); finishWithGuidedTranscript(); }
   function chooseView(next: View) { if (next === "teacher" && !isTeacherAccount) return toast("Sign in with a teacher account to open the Teacher Dashboard."); if (next === "parent" && !isParentAccount) return toast("Sign in with a parent account to open the Parent Dashboard."); if (next === "reading" && !childProfile) return toast("Set up a child profile before starting a Reading Session."); setView(next); }
   function switchWorkspace(target: "child" | "teacher") { window.sessionStorage.setItem("reader-leader-switch-role", target); void logout(); }
 
@@ -671,8 +714,13 @@ function ReadingView({ story, storyWords, processedWords, state, recognitionStat
   // its last word. Forward only: a page never turns back.
   useEffect(() => {
     if (positionIndex <= activePage.endWordIndex) return;
-    setPageIndex(current => Math.min(current + 1, pages.length - 1));
-  }, [activePage.endWordIndex, pages.length, positionIndex]);
+    // Seek to the page holding the cursor, once. Advancing one page per run re-fired on the
+    // new page and walked through the rest of the story, so a single bad cursor value showed
+    // up as a sprint to the end rather than as being one page out. Forward only.
+    const target = pages.findIndex(page => positionIndex <= page.endWordIndex);
+    if (target === -1) return;
+    setPageIndex(current => Math.max(current, target));
+  }, [activePage.endWordIndex, pages, positionIndex]);
   // Scoped to the page on screen. Searching the whole passage kept pointing the retry
   // prompt at a word from a page the reader had already left behind.
   const pageWordStates = wordStates.slice(activePage.startWordIndex, activePage.endWordIndex + 1);

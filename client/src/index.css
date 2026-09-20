@@ -255,7 +255,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--reader-gold); o
 .report-main .kicker { color: var(--blue); }
 .report-main h2 { font-family: "Archivo Black", sans-serif; letter-spacing: -1.4px; font-size: 30px; margin: 9px 0 9px; }
 .report-main > p { font-size: 14px; font-weight: 700; line-height: 1.5; color: #3e4a68; max-width: 490px; margin: 0; }
-.metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 24px 0; }
+.metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 168px)); justify-content: start; gap: 8px; margin: 24px 0; }
 .metric { padding: 11px 9px; border: 1.5px solid var(--ink); background: var(--paper); text-align: center; }
 .metric strong { display: block; font-family: "Archivo Black", sans-serif; font-size: 26px; letter-spacing: -1.5px; }
 .metric span { display: block; margin-top: 1px; font-family: "DM Mono", monospace; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
@@ -736,7 +736,6 @@ select:focus,
 .save-retry:disabled { opacity: .6; cursor: default; }
 .pace-caveat { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
 .accuracy-withheld { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
-.metric.metric-unreliable strong { color: #98a1b8; }
 /* A gap in the record a teacher can see. */
 .unrecorded-attempts { border-left: 5px solid #e4703f; }
 .unrecorded-attempt { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid #eef0f6; font-size: 13px; }

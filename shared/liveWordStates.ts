@@ -31,7 +31,19 @@ import { matchExpectedReadingWord, type EducatorApprovedIrishVariant, type Readi
  */
 export const REANCHOR_LOOKAHEAD = 3;
 
-const wordPattern = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
+/**
+ * The one definition of "a word" in this product.
+ *
+ * There were three copies: this one, the page tokenizer's whitespace split, and another in
+ * Home.tsx.
+ * The page tokenizer and this one disagree on a passage containing a number, a hyphenated
+ * word or a dash - "well-known" is one page token and two words, "100" is a page token and no
+ * word at all - and the reading view indexes word states by page-token position, so past the
+ * first such token the wrong word is highlighted and the drift grows. The three demo stories
+ * are clean prose, which is why every demo looked right; teacher-uploaded material is not.
+ */
+export const READING_WORD_PATTERN = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
+const wordPattern = READING_WORD_PATTERN;
 const normalise = (word: string) => word.toLowerCase().replace(/[^a-z']/g, "");
 const tokenize = (text: string) => (text.match(wordPattern) ?? []).map(normalise);
 
@@ -39,8 +51,28 @@ export function initialLiveWordStates(text: string): LiveWordState[] {
   return tokenize(text).map((word, index) => ({ id: `word-${index}`, text: word, status: index === 0 ? "current" : "unread", attempts: 0 }));
 }
 
-/** Applies the current full live-transcript result against the expected passage. */
-export function deriveLiveWordStates(expectedText: string, transcript: string, mode: LiveAssessmentMode, languageSupport: ReadingLanguageSupport = "STANDARD_ENGLISH", educatorApprovedVariants: EducatorApprovedIrishVariant[] = [], movedOnAttempts: ReadonlyMap<string, number> = new Map()): LiveWordState[] {
+export type LiveReading = {
+  states: LiveWordState[];
+  /** How far into the passage the matcher actually got. */
+  position: number;
+};
+
+/**
+ * Judgement and position from one pass, returned separately.
+ *
+ * The cursor used to be recovered afterwards by looking for the word marked "current", and
+ * that could not work: `status` carries judgement, and a word the reader is on which the
+ * matcher has flagged is both the cursor and incorrect at once, with only one field to say so.
+ * The pass below deliberately refuses to repaint a flagged word as the cursor - a red word
+ * must stay red - so in exactly that case no word was marked "current", the search returned
+ * -1, and the caller read that as "finished the passage". One misheard interim, which is what
+ * a first interim usually is, sent the child to the last page and the monotonic cursor kept
+ * her there.
+ *
+ * `expectedIndex` is where the matcher stopped. It is the answer, it is already computed, and
+ * it does not care what colour the word is.
+ */
+export function deriveLiveReading(expectedText: string, transcript: string, mode: LiveAssessmentMode, languageSupport: ReadingLanguageSupport = "STANDARD_ENGLISH", educatorApprovedVariants: EducatorApprovedIrishVariant[] = [], movedOnAttempts: ReadonlyMap<string, number> = new Map()): LiveReading {
   const states = initialLiveWordStates(expectedText);
   let expectedIndex = 0;
   const heardWords = tokenize(transcript);
@@ -135,7 +167,12 @@ export function deriveLiveWordStates(expectedText: string, transcript: string, m
   }
   while (expectedIndex < states.length && movedOnAttempts.has(states[expectedIndex].id)) expectedIndex += 1;
   if (expectedIndex < states.length && states[expectedIndex].status === "unread") states[expectedIndex].status = "current";
-  return states;
+  return { states, position: Math.min(expectedIndex, states.length) };
+}
+
+/** Judgement alone, for the callers that only colour words. */
+export function deriveLiveWordStates(expectedText: string, transcript: string, mode: LiveAssessmentMode, languageSupport: ReadingLanguageSupport = "STANDARD_ENGLISH", educatorApprovedVariants: EducatorApprovedIrishVariant[] = [], movedOnAttempts: ReadonlyMap<string, number> = new Map()): LiveWordState[] {
+  return deriveLiveReading(expectedText, transcript, mode, languageSupport, educatorApprovedVariants, movedOnAttempts).states;
 }
 
 export function firstGuidedModelWord(states: LiveWordState[], modelledWordIds: ReadonlySet<string>) {
@@ -165,38 +202,12 @@ export function keepWordsAlreadyRead(previous: LiveWordState[], next: LiveWordSt
 }
 
 /**
- * Where the reader is, as distinct from how she is doing.
- *
- * Judgement - correct, incorrect, self-corrected - comes from finalised results only, because
- * interim results are the recogniser thinking aloud and colouring from them turned a word
- * green, then red, then green. Position has the opposite requirement. One instrumented read
- * emitted nine finals across seventy-eight seconds, one of them 16,512ms after the interim
- * that first carried its words, so a cursor waiting for finals sits twenty words behind a
- * child reading perfectly well - which is what "does not keep up" is.
- *
- * This was tried once before and reverted, because it made the cursor flick between the word
- * being read and the last word on the page. Two causes, both fixed here rather than papered
- * over:
- *
- *   The cursor was clamped into the visible page. Position runs ahead of the page, because the
- *   page used to turn only on finals, so the clamp parked the cursor on the page's last word.
- *   There is no clamp now; the page follows the cursor instead.
- *
- *   The interim blanks constantly - between revisions, and on the event that carries a final -
- *   and position fell back to the finals each time, snapping the cursor backwards. It is now
- *   monotonic within a reading: `advanceReadingPosition` never returns a smaller index, so a
- *   blank interim leaves the cursor where it was instead of yanking it back.
- */
-export function liveReadingPosition(states: LiveWordState[]): number {
-  const at = states.findIndex(state => state.status === "current");
-  return at === -1 ? states.length : at;
-}
-
-/**
  * The cursor only ever moves forwards during a reading.
  *
- * A recogniser that revises itself downwards is not the child un-reading a word. Restarting
- * the reading resets the cursor; nothing else moves it back.
+ * A recogniser that revises itself downwards is not the child un-reading a word, and the
+ * interim blanks constantly - between revisions, and on the event that carries a final - so
+ * without this the cursor snapped back to the finals several times a second. Restarting the
+ * reading resets it; nothing else moves it back.
  */
 export function advanceReadingPosition(previousIndex: number, nextIndex: number): number {
   return Math.max(previousIndex, nextIndex);

@@ -640,3 +640,99 @@ the suite never contained the condition that breaks the code. The prior art repo
 identical failure — a regression suite clean through 45 releases because its fixtures held zero
 unstable observations. A journey that drops a mid-passage word now exists, and with
 re-anchoring removed it fails.
+
+# First instrumented read from a real voice, and what it found
+
+One recogniser instance, seventy-eight seconds, a real human reading aloud, zero recogniser
+errors, 170 interim results and 9 finals. Measured by a browser agent instrumenting the live
+page, not reasoned about. Three findings follow. The first is not a UI problem.
+
+## The microphone is unconstrained, and that is a data protection finding
+
+During the read, the recogniser transcribed **a conversation between bystanders** — about a
+pub, and about someone called David — and then a second, unrelated conversation. Each ran
+about twenty seconds and each was returned with full confidence, indistinguishable in the
+result stream from the child's own reading.
+
+This is not a robustness problem to be tuned. It is a processing question:
+
+- **The recogniser records people who have not been asked.** A bystander in a classroom, a
+  corridor or a kitchen is a data subject. Nobody obtained their consent, nobody told them,
+  and the school's basis for processing a pupil's reading does not extend to whoever is
+  audible near them.
+- **Their speech enters the child's record.** Anything the recogniser returns becomes the
+  transcript, is scored against the passage, and is stored on the child's session. A
+  conversation about David is, in the database, part of a named child's reading.
+- **Naming a bystander is worse than misrecording a word.** The example is not hypothetical
+  colour: the transcript contained a person's name.
+
+What this rules out, immediately: **the live recogniser must not run anywhere a reading is
+unsupervised**, and a reading captured with bystanders audible is not fit to store. Note also
+that this bears directly on the deferred storage decision in this document — the case for not
+retaining audio is now stronger than the access-control argument alone made it, because the
+audio does not only contain the child.
+
+What it does not resolve, and must not be answered by guessing: whether a reading can be
+constrained to one speaker at all without speaker identification, which this project will not
+build. A push-to-talk boundary, a supervised-capture requirement in the deployment terms, or
+both, are the candidates. **This is a decision for the DPO and the school, not a feature to
+design.** It is recorded here so it is made before any pilot, not discovered during one.
+
+## Web Speech `confidence` is always exactly 1, so it cannot feed the review queue
+
+Every result in the instrumented read carried `confidence === 1`, exactly, including the
+bystander conversations. This is what `processLocally = true` returns: the on-device path
+reports no calibrated score.
+
+This belongs beside `alignmentConfidence` in **Built, and not live — say it this way**, and it
+closes off the shortcut someone will reach for. The review queue needs a per-word score to
+order by. The browser cannot supply one. A constant is not a score, and ordering a queue by a
+constant would produce a screen that looks ranked and is not — the same defect as the tricky
+words list, one layer down.
+
+So the table in that section gains a row:
+
+| | |
+| --- | --- |
+| The browser recogniser could supply the confidence the queue needs | **false** — `confidence` is 1 on every result under `processLocally` |
+
+## WCPM showed 23 against a passage that supports 32 to 46, and the duration is padded
+
+The screen showed **23 WCPM**. Counted by hand from the same read: about **46** over the
+55-second reading window, or about **32** over the full 78-second session. Neither is 23, and
+no combination of the recorded figures produces it.
+
+Two things are wrong and they should not be conflated:
+
+1. **The formula is unexplained.** 23 is not the reading window, not the session, and not the
+   settled-words figure. Until someone can derive it from stored values, the number on the
+   screen is of unknown provenance. That is the same class of defect as the tricky words
+   list: a figure presented as measured that nobody can trace to a measurement.
+2. **Any session-derived duration is inflated.** The instrumented read contained **20.9
+   seconds of dead time** after the child stopped, during which the recogniser continued and
+   re-recognised. A denominator taken from the session rather than from speech is therefore
+   about 27% too large here, which drags WCPM down by roughly the same proportion.
+
+This does not reopen the settled-pace decision — WCPM is already withheld until a teacher has
+reviewed, and already off the child's screen. It says that when a figure is published, its
+duration must come from the span of speech, not the span of the session, and its formula must
+be derivable from stored columns by someone who was not there.
+
+## Latent, unconfirmed, and worth one measurement each
+
+Recorded so they are not rediscovered. None is acted on.
+
+- **`event.resultIndex` is never referenced** although the recogniser runs with
+  `continuous: true`. The handler walks `event.results` from index 0 on every event. On this
+  read it produced a correct transcript, so there is no observed defect — but it is the shape
+  of code that reprocesses settled results, and one measurement would say whether it matters.
+- **`SpeechRecognition.phrases` is unused** although the passage is known before the child
+  starts. The API accepts a biasing vocabulary. Whether it helps, and whether it helps some
+  readers more than others, is measurable and unmeasured. It is not to be enabled on the
+  assumption that it helps: biasing towards expected words can also manufacture matches for
+  words the child did not say, which would inflate accuracy for exactly the readers this
+  product exists for.
+- **`stop()` took 9 seconds** under continuous speech. That is the delay between a child
+  pressing finish and the page responding, and it is a plausible contributor to the missing
+  last sentence in the reading that produced the fabricated tricky words. Worth timing
+  deliberately before anyone concludes the transcript truncation is fixed.

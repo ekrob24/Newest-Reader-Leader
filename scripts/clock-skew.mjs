@@ -46,6 +46,35 @@ export function skewReport({ globalTz, sessionTz, machineTz, offsetHours, mysqlN
   return lines;
 }
 
+/**
+ * Ask the database what time it thinks it is. Read-only.
+ *
+ * Returns null when it cannot be measured at all, which the caller must treat as "cause not
+ * established" rather than as "no skew": scripts/gate.mjs excuses a failing test only on a
+ * skew it has actually seen.
+ */
+export async function measureSkewMinutes(url) {
+  let connection;
+  try {
+    connection = await mysql.createConnection(url);
+  } catch {
+    return null;
+  }
+  try {
+    const [rows] = await connection.query(
+      "SELECT @@global.time_zone AS globalTz, @@session.time_zone AS sessionTz, NOW() AS mysqlNow",
+    );
+    const { globalTz, sessionTz, mysqlNow } = rows[0];
+    const asRead = mysqlNow instanceof Date ? mysqlNow : new Date(String(mysqlNow));
+    if (Number.isNaN(asRead.getTime())) return null;
+    return { globalTz, sessionTz, skewMinutes: Math.round((Date.now() - asRead.getTime()) / 60000) };
+  } catch {
+    return null;
+  } finally {
+    await connection.end();
+  }
+}
+
 if (resolve(process.argv[1] ?? "").toLowerCase() !== fileURLToPath(import.meta.url).toLowerCase()) {
   // Imported by the tests; nothing below should run.
 } else await main();

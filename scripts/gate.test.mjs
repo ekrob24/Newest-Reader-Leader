@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { playwrightFailure, summariseVitest, summarisePlaywright, verdict, vitestFailures } from "./gate.mjs";
+import { EXCEPTIONS, partitionFailures, playwrightFailure, summariseVitest, summarisePlaywright, verdict, vitestFailures } from "./gate.mjs";
 
 /**
  * The failure this script exists to prevent is a green verdict over a gate that never ran.
@@ -20,7 +20,7 @@ describe("reading the vitest run", () => {
   it("calls the gate passed only when its assertions actually ran and passed", () => {
     const summary = summariseVitest(vitestReport([gateFile([{ fullName: "walks the demo", status: "passed" }])], { numPassedTests: 316 }));
     expect(summary.gate).toBe("passed");
-    expect(verdict(summary, bothJourneysPass)).toBe(true);
+    expect(verdict(summary, bothJourneysPass, [])).toBe(true);
   });
 
   it("calls a skipped gate skipped, not passed, and refuses to go green", () => {
@@ -29,13 +29,13 @@ describe("reading the vitest run", () => {
     const summary = summariseVitest(vitestReport([gateFile([{ fullName: "walks the demo", status: "skipped" }])], { numPassedTests: 315, numPendingTests: 58 }));
     expect(summary.gate).toBe("skipped");
     expect(summary.failed).toBe(0);
-    expect(verdict(summary, bothJourneysPass)).toBe(false);
+    expect(verdict(summary, bothJourneysPass, [])).toBe(false);
   });
 
   it("calls a gate that is not in the run at all missing, and refuses to go green", () => {
     const summary = summariseVitest(vitestReport([{ name: "server/reader.test.ts", assertionResults: [{ status: "passed" }] }], { numPassedTests: 12 }));
     expect(summary.gate).toBe("missing");
-    expect(verdict(summary, bothJourneysPass)).toBe(false);
+    expect(verdict(summary, bothJourneysPass, [])).toBe(false);
   });
 
   it("names the failing gate assertion", () => {
@@ -44,7 +44,7 @@ describe("reading the vitest run", () => {
     ])], { numFailedTests: 1 }));
     expect(summary.gate).toBe("failed");
     expect(summary.gateFailures).toEqual(["the fallback demo's four numbers > walks the demo"]);
-    expect(verdict(summary, bothJourneysPass)).toBe(false);
+    expect(verdict(summary, bothJourneysPass, [])).toBe(false);
   });
 
   it("finds the gate file whichever way the path is written", () => {
@@ -56,13 +56,13 @@ describe("reading the vitest run", () => {
   it("goes red when the gate passed but something else in the suite failed", () => {
     const summary = summariseVitest(vitestReport([gateFile([{ status: "passed" }])], { numPassedTests: 300, numFailedTests: 2 }));
     expect(summary.gate).toBe("passed");
-    expect(verdict(summary, bothJourneysPass)).toBe(false);
+    expect(verdict(summary, bothJourneysPass, [{ name: "something", file: "x.test.ts" }])).toBe(false);
   });
 
   it("survives a report it could not read at all", () => {
     const summary = summariseVitest(null);
     expect(summary.gate).toBe("missing");
-    expect(verdict(summary, bothJourneysPass)).toBe(false);
+    expect(verdict(summary, bothJourneysPass, [])).toBe(false);
   });
 });
 
@@ -82,7 +82,7 @@ describe("reading the Playwright run", () => {
       pwSpec("a dropped function word does not stop the reading", false),
     ]));
     expect(journeys[1].status).toBe("failed");
-    expect(verdict(passingGate, journeys)).toBe(false);
+    expect(verdict(passingGate, journeys, [])).toBe(false);
   });
 
   it("goes red when a journey was skipped rather than run", () => {
@@ -91,14 +91,14 @@ describe("reading the Playwright run", () => {
       pwSpec("a dropped function word does not stop the reading", false, "skipped"),
     ]));
     expect(journeys[1].status).toBe("skipped");
-    expect(verdict(passingGate, journeys)).toBe(false);
+    expect(verdict(passingGate, journeys, [])).toBe(false);
   });
 
   it("goes red when a journey is absent from the report, including an empty one", () => {
     for (const report of [pwReport([pwSpec("the demo journey", true)]), {}, null]) {
       const journeys = summarisePlaywright(report);
       expect(journeys.some(journey => journey.status === "missing")).toBe(true);
-      expect(verdict(passingGate, journeys)).toBe(false);
+      expect(verdict(passingGate, journeys, [])).toBe(false);
     }
   });
 });
@@ -149,5 +149,75 @@ describe("the runner's own tests", () => {
     expect(withoutOwn.ownTestsRan).toBe(false);
     const withOwn = summariseVitest({ testResults: [{ name: "D:\\rl\\scripts\\gate.test.mjs", assertionResults: [{ status: "passed" }] }] });
     expect(withOwn.ownTestsRan).toBe(true);
+  });
+});
+
+describe("the one recorded exception", () => {
+  const recorded = EXCEPTIONS[0];
+  const skewed = { clockSkewMinutes: 60, sessionTz: "UTC", globalTz: "SYSTEM" };
+  const theFailure = { file: recorded.file, name: recorded.name, message: "AssertionError: expected 3599708 to be less than 60000" };
+  const passingGate = summariseVitest(vitestReport([gateFile([{ status: "passed" }])], { numPassedTests: 372, numFailedTests: 1 }));
+
+  it("excuses exactly that test, on a machine where the skew is actually there", () => {
+    const { blocking, excused } = partitionFailures([theFailure], skewed);
+    expect(blocking).toEqual([]);
+    expect(excused).toHaveLength(1);
+    expect(excused[0].reason).toBe("pre-existing timezone skew");
+    expect(excused[0].recorded).toBe("2026-09-20");
+    expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(true);
+  });
+
+  it("does not excuse it on a machine with no skew - not established is not excused", () => {
+    for (const measured of [{ clockSkewMinutes: 0 }, { clockSkewMinutes: 1 }, null, undefined, {}]) {
+      const { blocking, excused } = partitionFailures([theFailure], measured);
+      expect(excused).toEqual([]);
+      expect(blocking).toHaveLength(1);
+      expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
+    }
+  });
+
+  it("does not let the exception swallow a second failure alongside it", () => {
+    const other = { file: "reviewQueue.integration.test.ts", name: "orders the queue", message: "expected 3 to be 2" };
+    const { blocking, excused } = partitionFailures([theFailure, other], skewed);
+    expect(excused.map(item => item.name)).toEqual([recorded.name]);
+    expect(blocking).toEqual([other]);
+    expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
+  });
+
+  it("does not cover a different test in the same file", () => {
+    const sibling = { file: recorded.file, name: "session identity keeps a plausible device clock and marks it authoritative", message: "boom" };
+    const { blocking, excused } = partitionFailures([sibling], skewed);
+    expect(excused).toEqual([]);
+    expect(blocking).toEqual([sibling]);
+    expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
+  });
+
+  it("does not cover the same test name arriving from a different file", () => {
+    const elsewhere = { file: "somethingElse.integration.test.ts", name: recorded.name, message: "boom" };
+    expect(partitionFailures([elsewhere], skewed).blocking).toEqual([elsewhere]);
+  });
+
+  it("still goes red when the gate numbers move, exception or not", () => {
+    const movedGate = summariseVitest(vitestReport([gateFile([{ fullName: "walks the demo", status: "failed" }])], { numFailedTests: 2 }));
+    const { blocking } = partitionFailures([theFailure], skewed);
+    expect(blocking).toEqual([]);
+    expect(verdict(movedGate, bothJourneysPass, blocking)).toBe(false);
+  });
+
+  it("still goes red when a journey fails, exception or not", () => {
+    const journeys = summarisePlaywright(pwReport([
+      pwSpec("the demo journey", false),
+      pwSpec("a dropped function word does not stop the reading", true),
+    ]));
+    const { blocking } = partitionFailures([theFailure], skewed);
+    expect(verdict(passingGate, journeys, blocking)).toBe(false);
+  });
+
+  it("carries a reason and a date, so the waiver has a source", () => {
+    for (const item of EXCEPTIONS) {
+      expect(item.reason).toBeTruthy();
+      expect(item.recorded).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(typeof item.holdsWhen).toBe("function");
+    }
   });
 });

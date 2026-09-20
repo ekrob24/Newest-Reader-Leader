@@ -267,6 +267,22 @@ called it, and now this. Every one was found late and none was found by reading 
 only defence that has actually worked is writing it down where people read, so it is written
 down here.
 
+**Fifth: `effectiveCaptureTime` in `shared/captureTime.ts` has no production caller.** It is
+the function that decides which instant a reading is ordered by - the device's clock when the
+device's clock was trusted, the server's otherwise - and it is imported only by its own test.
+Found while establishing why `sessionIdentity.integration.test.ts` reports a one-hour gap
+between `createdAt` and the instant it was written: server-generated timestamps come back
+skewed by the difference between the MySQL session's timezone and the reading machine's, and
+`effectiveCaptureTime` is the one place a skewed server time would be compared against an
+unskewed device time. Because nothing calls it, that comparison is latent rather than live.
+It was not found by reading the code either; it was found by chasing a failing assertion.
+
+At five, the pattern is the finding. Something here is repeatedly built one step ahead of the
+thing that would use it, and the gap is only ever closed by accident. Two defences are worth
+considering after the final, and neither is a code review: a check that every exported symbol
+outside `shared/` has a caller that is not a test, and a rule that a new capability lands with
+its caller in the same change or does not land.
+
 ## The measurement changed
 
 False-correction rate is the right metric for software that scores a child on its own. We are

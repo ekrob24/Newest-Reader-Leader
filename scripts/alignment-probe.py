@@ -86,6 +86,22 @@ def normalised_words(text):
 SELF_CORRECTION_INDEX = 35
 
 
+def word_score(word_spans):
+    """One word's alignment score: the mean of its token scores weighted by token duration.
+
+    Weighted rather than plain so a long stressed vowel counts for more than the consonant
+    beside it, and a one-token word is comparable with a five-token one. A word the aligner
+    gave no audio at all scores zero rather than raising: no audio matched it, which is the
+    strongest evidence of omission there is. Deliberate, not a division guard.
+
+    Shared with alignment-script-match.py so the two cannot drift apart.
+    """
+    total = sum(s.end - s.start for s in word_spans)
+    if not total:
+        return 0.0
+    return sum(s.score * (s.end - s.start) for s in word_spans) / total
+
+
 def score_rows(words, spans, ratio, self_corrected=True):
     """One row per expected word: the duration-weighted mean of its token alignment scores.
 
@@ -101,11 +117,7 @@ def score_rows(words, spans, ratio, self_corrected=True):
     """
     rows = []
     for index, (word, word_spans) in enumerate(zip(words, spans)):
-        total = sum(s.end - s.start for s in word_spans)
-        # A word the aligner gave no audio at all scores zero rather than raising: no audio
-        # matched it, which is the strongest evidence of omission there is. Deliberate, not a
-        # division guard - if it ever happens the row will sit at the bottom of the table.
-        score = sum(s.score * (s.end - s.start) for s in word_spans) / total if total else 0.0
+        score = word_score(word_spans)
         kind = DELIBERATE.get(index, (None, None))[0]
         skipped = index == SELF_CORRECTION_INDEX and not self_corrected
         if skipped:

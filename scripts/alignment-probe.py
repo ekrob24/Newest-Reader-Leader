@@ -20,8 +20,15 @@ The aligner weights come down from download.pytorch.org on first run, about 1.2G
 
 torchaudio's forced_align with the MMS_FA bundle, rather than WhisperX: it returns a
 per-token score directly, which is the number the whole question turns on; it does not drag
-in whisper and pyannote when only the aligner is wanted; and its weights come from
-download.pytorch.org rather than HuggingFace, which already cost us a Windows symlink failure.
+in whisper and pyannote when only the aligner is wanted; and it fetches its weights straight
+over https rather than through the HuggingFace cache, which already cost us a Windows symlink
+failure. (The weights come from dl.fbaipublicfiles.com, not download.pytorch.org as an earlier
+version of this note said.)
+
+Note the probe never calls torchaudio.load. From torchaudio 2.9 that routes through TorchCodec,
+a separate package a plain `pip install torch torchaudio` does not bring with it, so it raises
+ImportError on a current install - and, before this was found, took the whole run down after
+the recording and before anything was written.
 
 The thing to distrust: forced alignment is forced. It must place every expected word
 somewhere, including a word that was never spoken. The omitted word is the sharpest test in
@@ -32,11 +39,13 @@ scripts/alignment-probe-selftest.py without any model or audio, so an arithmetic
 the verdict cannot hide behind a model download.
 """
 import argparse
+import glob
 import json
 import os
 import re
 import sys
 import time
+import traceback
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 
@@ -260,9 +269,80 @@ def record(path, seconds):
     return True
 
 
+def read_audio(path):
+    """Read a mono waveform without torchaudio.load.
+
+    torchaudio 2.9 onwards routes load() through TorchCodec, a separate package that a plain
+    `pip install torch torchaudio` does not bring with it, so the call raises ImportError on a
+    current install. The probe records through soundfile and only ever reads its own 16kHz
+    wav, so it reads it back the same way, and falls back to the standard library, which can
+    handle 16-bit PCM unaided. Returns (tensor shaped (1, samples), sample_rate) or an
+    explanation of every attempt that failed.
+    """
+    import torch
+
+    attempts = []
+    try:
+        import soundfile as sf
+        data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+        waveform = torch.from_numpy(data).transpose(0, 1).contiguous()
+        return waveform, sample_rate, None
+    except Exception as error:
+        attempts.append(f"  soundfile: {type(error).__name__}: {error}")
+
+    try:
+        import array
+        import wave
+
+        with wave.open(path, "rb") as handle:
+            if handle.getsampwidth() != 2:
+                raise ValueError(f"{handle.getsampwidth() * 8}-bit audio; this fallback reads 16-bit PCM")
+            channels, sample_rate = handle.getnchannels(), handle.getframerate()
+            samples = array.array("h")
+            samples.frombytes(handle.readframes(handle.getnframes()))
+        if sys.byteorder == "big":
+            samples.byteswap()
+        waveform = torch.tensor(samples, dtype=torch.float32).div(32768.0)
+        return waveform.view(-1, channels).transpose(0, 1).contiguous(), sample_rate, None
+    except Exception as error:
+        attempts.append(f"  wave (stdlib): {type(error).__name__}: {error}")
+
+    try:
+        import torchaudio
+        waveform, sample_rate = torchaudio.load(path)
+        return waveform, sample_rate, None
+    except Exception as error:
+        attempts.append(f"  torchaudio.load: {type(error).__name__}: {error}")
+
+    return None, None, "Could not read the audio. Every reader failed:\n" + "\n".join(attempts)
+
+
+def locate_audio(path):
+    """The recording is written relative to whatever directory the probe was run from, so a
+    second run from somewhere else will not find it. Rather than let torchaudio raise a bare
+    load error, look in the obvious places and say exactly which ones were tried."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.path.abspath(path), os.path.join(here, os.path.basename(path))]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate, None
+    nearby = sorted(set(glob.glob("*.wav") + glob.glob(os.path.join(here, "*.wav"))))
+    report = ["No audio file found. Looked for:"]
+    report += [f"  {candidate}" for candidate in candidates]
+    report.append(f"  (run from {os.getcwd()})")
+    if nearby:
+        report.append("wav files that ARE here - pass one with --audio:")
+        report += [f"  {os.path.abspath(name)}" for name in nearby]
+    else:
+        report.append("No .wav files in either directory at all, so the recording was not")
+        report.append("saved. Re-run without --skip-record to record it.")
+    return None, "\n".join(report)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", default="alignment-probe.wav")
+    parser.add_argument("--json", default="alignment-probe.json", help="where to write the result")
     parser.add_argument("--seconds", type=int, default=45)
     parser.add_argument("--skip-record", action="store_true",
                         help="align an existing --audio file instead of recording a new one")
@@ -270,6 +350,10 @@ def main():
                         help="the recording does not contain the self-correction: word 35 was "
                              "read straight through, so score it as an ordinary correct word")
     args = parser.parse_args()
+
+    destination = os.path.abspath(args.json)
+    print(f"Result will be written to: {destination}")
+    print(f"Running in: {os.getcwd()}")
 
     words = normalised_words(PASSAGE)
     print(f"{len(words)} expected words.")
@@ -285,12 +369,30 @@ def main():
     if not args.skip_record and not record(args.audio, args.seconds):
         return 1
 
+    audio_path, problem = locate_audio(args.audio)
+    if problem:
+        print("\n" + problem)
+        return 4
+    print(f"reading {audio_path}")
+
     try:
         import torch
         import torchaudio
     except ImportError:
         print("pip install torch torchaudio")
         return 1
+
+    waveform, sample_rate, problem = read_audio(audio_path)
+    if problem:
+        print(problem)
+        return 4
+    peak = float(waveform.abs().max()) if waveform.numel() else 0.0
+    duration = waveform.size(1) / sample_rate if waveform.numel() else 0.0
+    print(f"{duration:.1f}s at {sample_rate}Hz, peak amplitude {peak:.4f}")
+    if waveform.numel() == 0 or peak < 1e-4:
+        print("That is silence. Nothing was captured, so no alignment would mean anything.")
+        print("Re-run without --skip-record to record again.")
+        return 5
 
     print(f"\ntorchaudio {torchaudio.__version__}; loading the MMS_FA aligner...")
     started = time.time()
@@ -304,16 +406,20 @@ def main():
         return 1
     print(f"loaded in {time.time() - started:.1f}s")
 
-    waveform, sample_rate = torchaudio.load(args.audio)
     if waveform.size(0) > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
     if sample_rate != bundle.sample_rate:
         waveform = torchaudio.functional.resample(waveform, sample_rate, bundle.sample_rate)
 
     started = time.time()
-    with torch.inference_mode():
-        emission, _ = model(waveform)
-        spans = aligner(emission[0], tokenizer([w.lower() for w in words]))
+    try:
+        with torch.inference_mode():
+            emission, _ = model(waveform)
+            spans = aligner(emission[0], tokenizer([w.lower() for w in words]))
+    except Exception as error:
+        print(f"ALIGNMENT FAILED: {type(error).__name__}: {error}")
+        traceback.print_exc()
+        return 6
     elapsed = time.time() - started
     seconds_of_audio = waveform.size(1) / bundle.sample_rate
     ratio = waveform.size(1) / emission.size(1) / bundle.sample_rate
@@ -333,7 +439,7 @@ def main():
           f"({seconds_of_audio / max(elapsed, .01):.1f}x real time)\n")
     print_report(rows, verdict)
 
-    with open("alignment-probe.json", "w", encoding="utf-8") as handle:
+    with open(destination, "w", encoding="utf-8") as handle:
         json.dump({
             "passage": PASSAGE,
             "audio_seconds": round(seconds_of_audio, 1),
@@ -344,11 +450,23 @@ def main():
             "best_error": verdict["best_error"],
             "insertion_uncovered_seconds": verdict["insertion"]["uncovered_seconds"],
             "self_correction_performed": self_corrected,
+            "audio_path": audio_path,
             "rows": rows,
         }, handle, indent=1)
-    print("\nWritten to alignment-probe.json - send me that file.")
+    print(f"\nWROTE: {destination}")
+    print("Send me that file.")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    except Exception:
+        # A traceback alone leaves "it produced nothing" as the only visible result.
+        traceback.print_exc()
+        print("\nThe probe stopped on the error above and wrote no JSON.")
+        print("Send me everything the terminal printed, starting from the command itself.")
+        code = 7
+    if code:
+        print(f"\nFinished with exit code {code} and no result file.")
+    sys.exit(code)

@@ -54,3 +54,21 @@ export function settledWordsCorrectPerMinute(input: {
 /** One line for a surface showing the gap where an unreviewed reading's pace would be. */
 export const PACE_AWAITS_REVIEW =
   "Reading speed appears once the teacher has finished reviewing this reading.";
+
+/**
+ * The average of the paces that are actually published, or null when none are.
+ *
+ * A reading whose review is unfinished contributes no pace at all - `settledWordsCorrectPerMinute`
+ * returns null for it - and the whole point is that those readings are absent from the average
+ * rather than counted as zero. Averaging nulls as zeroes is how a teacher's screen came to read
+ * "0 WCPM" for a child who had just read a whole passage aloud: a claim about her reading speed,
+ * made out of the absence of a review.
+ *
+ * Null here means "no reading has been reviewed yet", and every surface renders that as an em
+ * dash. Zero is only ever returned when a reviewed reading genuinely produced zero.
+ */
+export function publishedPaceAverage(paces: ReadonlyArray<number | null>): number | null {
+  const published = paces.filter((pace): pace is number => typeof pace === "number" && Number.isFinite(pace));
+  if (!published.length) return null;
+  return Math.round(published.reduce((sum, pace) => sum + pace, 0) / published.length);
+}

@@ -87,6 +87,9 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--reader-gold); o
 .story-art .robot { width: 76px; height: 72px; position: relative; z-index: 1; border: 2px solid var(--ink); background: var(--yellow); }
 .story-art .robot::before { content: ""; position: absolute; width: 52px; height: 19px; border: 2px solid var(--ink); border-bottom: 0; background: var(--red); top: -22px; left: 10px; }
 .story-art .robot::after { content: "•  •"; position: absolute; color: var(--ink); font-family: "Archivo Black", sans-serif; font-size: 22px; letter-spacing: 9px; left: 14px; top: 14px; }
+.story-art .lantern { width: 52px; height: 64px; position: relative; z-index: 1; border: 2px solid var(--ink); background: var(--yellow); border-radius: 9px 9px 12px 12px; }
+.story-art .lantern::before { content: ""; position: absolute; width: 32px; height: 24px; border: 2px solid var(--ink); border-bottom: 0; border-radius: 50% 50% 0 0; top: -26px; left: 8px; }
+.story-art .lantern::after { content: ""; position: absolute; width: 18px; height: 28px; border: 2px solid var(--ink); background: var(--art-accent); border-radius: 50% 50% 42% 42%; left: 15px; top: 16px; }
 .story-meta { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: "DM Mono", monospace; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .level-pill { display: inline-flex; align-items: center; width: fit-content; padding: 5px 7px; background: var(--pill); border: 1.5px solid var(--ink); font-weight: 600; }
 .story-card h3 { font-family: "Archivo Black", sans-serif; letter-spacing: -1px; font-size: 23px; line-height: 1; margin: 12px 0 8px; }

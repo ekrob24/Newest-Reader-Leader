@@ -39,7 +39,7 @@ import { scopedDb, unscopedDb, type TenantScope } from "./tenantScope";
 import { storagePut } from "./storage";
 import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek, type TrendDateRange } from "./learningAnalytics";
 import { progressForAudience } from "../shared/accuracyAudience";
-import { settledWordsCorrectPerMinute } from "../shared/readingPace";
+import { publishedPaceAverage, settledWordsCorrectPerMinute } from "../shared/readingPace";
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
@@ -831,24 +831,34 @@ export async function getTeacherDashboard(scope: TenantScope, teacherUserId: num
   const settingsRows = profileIds.length ? await db.select().from(learnerReadingSettings).where(inArray(learnerReadingSettings.childProfileId, profileIds)) : [];
   const weekStart = currentWeekStart();
   const goalRows = profileIds.length ? await db.select().from(weeklyReadingGoals).where(and(eq(weeklyReadingGoals.teacherUserId, teacherUserId), inArray(weeklyReadingGoals.childProfileId, profileIds))) : [];
+  // Reading speed comes from the readings a teacher has finished reviewing, as it does on the
+  // child's and the parent's screens. Averaging the stored figure here ignored that rule
+  // entirely and put a number on the teacher's screen for readings nobody had looked at - and
+  // when the recogniser matched nothing, that number was 0 WCPM against a child who had just
+  // read a passage aloud. Null means no reading has been reviewed yet, and the screen shows a
+  // dash. An absence is not a measurement of zero.
+  const settledPaces = await settledPaceBySession(scope, sessions);
   const pupils = enrolled.map(pupil => {
     const pupilSessions = sessions.filter(session => session.childProfileId === pupil.childProfileId);
     const count = pupilSessions.length || 1;
+    const pupilPaces = pupilSessions.map(session => settledPaces.get(session.id) ?? null);
     const settings = settingsRows.find(item => item.childProfileId === pupil.childProfileId) ?? defaultLearnerSettings(pupil.childProfileId);
     const weeklyGoal = goalRows.find(goal => goal.childProfileId === pupil.childProfileId && goal.weekStart === weekStart);
-    return { ...pupil, className: classes.find(readerClass => readerClass.id === pupil.classId)?.name ?? "Class", sessionCount: pupilSessions.length, accuracy: Math.round(pupilSessions.reduce((sum, session) => sum + session.accuracy, 0) / count), wcpm: Math.round(pupilSessions.reduce((sum, session) => sum + session.wordsCorrectPerMinute, 0) / count), settings, weeklyGoal, weeklyGoalProgress: weeklyGoal ? summariseWeeklyGoalProgress(pupilSessions, weeklyGoal.weekStart) : undefined };
+    return { ...pupil, className: classes.find(readerClass => readerClass.id === pupil.classId)?.name ?? "Class", sessionCount: pupilSessions.length, accuracy: Math.round(pupilSessions.reduce((sum, session) => sum + session.accuracy, 0) / count), wcpm: publishedPaceAverage(pupilPaces), readingsWithSettledPace: pupilPaces.filter(pace => pace !== null).length, settings, weeklyGoal, weeklyGoalProgress: weeklyGoal ? summariseWeeklyGoalProgress(pupilSessions, weeklyGoal.weekStart) : undefined };
   });
   const classSummaries = classes.map(readerClass => {
     const classPupils = pupils.filter(pupil => pupil.classId === readerClass.id);
     const classSessions = sessions.filter(session => classPupils.some(pupil => pupil.childProfileId === session.childProfileId));
     const trackedPupils = classPupils.filter(pupil => pupil.sessionCount > 0);
     const pupilCount = trackedPupils.length || 1;
-    return { ...readerClass, pupilCount: classPupils.length, averageAccuracy: Math.round(trackedPupils.reduce((sum, pupil) => sum + pupil.accuracy, 0) / pupilCount), averageWcpm: Math.round(trackedPupils.reduce((sum, pupil) => sum + pupil.wcpm, 0) / pupilCount), assessmentTrend: buildMonthlyAssessmentTrend(classSessions) };
+    return { ...readerClass, pupilCount: classPupils.length, averageAccuracy: Math.round(trackedPupils.reduce((sum, pupil) => sum + pupil.accuracy, 0) / pupilCount), averageWcpm: publishedPaceAverage(trackedPupils.map(pupil => pupil.wcpm)), assessmentTrend: buildMonthlyAssessmentTrend(classSessions) };
   });
   const needsReview = sessions.flatMap(session => session.interventions.filter(intervention => intervention.action === "teacher_review").map(intervention => ({ sessionId: session.id, childProfileId: session.childProfileId, storyTitle: session.storyTitle, ...intervention }))).slice(0, 5);
   const materials = await listTeacherMaterials(scope, teacherUserId);
   const comments = await getSessionComments(scope, sessions.map(session => session.id));
-  const recentSessions = sessions.slice(0, 8).map(session => ({ ...session, childName: enrolled.find(pupil => pupil.childProfileId === session.childProfileId)?.displayName ?? "Reader", comments: comments.filter(comment => comment.sessionId === session.id) }));
+  // Each row carries the settled pace too, so the saved-sessions list shows the same figure
+  // the rest of the product does rather than the stored guess.
+  const recentSessions = sessions.slice(0, 8).map(session => ({ ...session, settledWordsCorrectPerMinute: settledPaces.get(session.id) ?? null, childName: enrolled.find(pupil => pupil.childProfileId === session.childProfileId)?.displayName ?? "Reader", comments: comments.filter(comment => comment.sessionId === session.id) }));
   const approvedIrishVariants = await db.select().from(educatorApprovedIrishVariants).where(inArray(educatorApprovedIrishVariants.classId, classIds)).orderBy(desc(educatorApprovedIrishVariants.updatedAt));
   return { classes: classSummaries, pupils, needsReview, provisionalMatches: await listTeacherProvisionalMatches(scope, teacherUserId), unrecordedAttempts: await listUnrecordedReadingAttempts(scope, teacherUserId), approvedIrishVariants, materials, recentSessions, classAssessmentTrend: buildMonthlyAssessmentTrend(sessions), termPresets, weeklyGoals: goalRows, weekStart, branding: await getSchoolBrandingForTeacher(scope, teacherUserId) };
 }

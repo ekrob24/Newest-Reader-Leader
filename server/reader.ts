@@ -1,3 +1,4 @@
+import { REANCHOR_LOOKAHEAD } from "../shared/liveWordStates";
 import type { AssessmentMode, StoredWordState } from "../drizzle/schema";
 import { isPaceMeaningful } from "../shared/readingPace";
 import { matchExpectedReadingWord, type EducatorApprovedIrishVariant, type ReadingLanguageSupport } from "../shared/dialectSupport";
@@ -42,6 +43,16 @@ function mergeAttemptHistory(states: WordState[], attemptedStates: WordState[] |
   });
 }
 
+/**
+ * How many expected words the comparison will step over to find the one that was said.
+ *
+ * Deliberately the same as the live cursor's REANCHOR_LOOKAHEAD, and for the same reasons: the
+ * sweep behind that number showed three is the largest window that recovers a run of dropped
+ * words without starting to match a later copy of a word the child has not reached. Keeping
+ * them equal also keeps the saved record and the highlight the child saw telling one story.
+ */
+const OMISSION_LOOKAHEAD = REANCHOR_LOOKAHEAD;
+
 /** Transparent transcript comparison; it records practice/review signals, not a reading diagnosis. */
 export function analyseReadingText(expectedText: string, transcript: string, durationSeconds: number, mode: AssessmentMode = "ASSISTED_PRACTICE", attemptedStates?: WordState[], languageSupport: ReadingLanguageSupport = "STANDARD_ENGLISH", educatorApprovedVariants: EducatorApprovedIrishVariant[] = []): ReadingAnalysis {
   const expected = tokenize(expectedText); const observed = tokenize(transcript); const states = initialiseWordStates(expectedText); const events: ReadingEvent[] = [];
@@ -57,9 +68,33 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
     }
     if (observedIndex + 1 < observed.length && matchExpectedReadingWord(target, observed[observedIndex + 1], languageSupport, educatorApprovedVariants).matches) { events.push({ expectedWord: target, recognisedWord: null, eventType: "insertion", action: eventAction(mode, "insertion") }); observedIndex += 1; continue; }
     state.attempts += 1; state.status = "incorrect";
-    const kind: ReadingEventKind = expectedIndex + 1 < expected.length && matchExpectedReadingWord(expected[expectedIndex + 1], heard, languageSupport, educatorApprovedVariants).matches ? "omission" : "substitution";
+    // How many expected words the child skipped before the one she actually said.
+    //
+    // This looked one word ahead. One omission recovered; two in a row did not, and the
+    // comparison never resynchronised for the rest of the passage. Measured on the project's
+    // own passage, two adjacent omissions scored 7% where each alone scored 98% - and the
+    // adjacent pair in that passage is "into the", which is exactly what a recogniser drops
+    // when connected speech reduces it to a single blur.
+    //
+    // The window matches the live cursor's, for one reason worth stating: the two run over the
+    // same reading and a teacher should not see a record that disagrees with what the child
+    // saw. Its size is argued where it is defined.
+    let skipped = 0;
+    for (let ahead = 1; ahead <= OMISSION_LOOKAHEAD && expectedIndex + ahead < expected.length; ahead += 1) {
+      if (matchExpectedReadingWord(expected[expectedIndex + ahead], heard, languageSupport, educatorApprovedVariants).matches) { skipped = ahead; break; }
+    }
+    const kind: ReadingEventKind = skipped > 0 ? "omission" : "substitution";
     events.push({ expectedWord: target, recognisedWord: kind === "omission" ? null : heard, eventType: kind, action: eventAction(mode, kind) });
-    if (kind === "omission") expectedIndex += 1; else { expectedIndex += 1; observedIndex += 1; }
+    if (kind === "omission") {
+      // Every word passed over is its own omission. Recording only the first would count one
+      // error where the child made two, and leave the rest of the run silently unaccounted.
+      for (let extra = 1; extra < skipped; extra += 1) {
+        const passedOver = states[expectedIndex + extra];
+        passedOver.attempts += 1; passedOver.status = "incorrect";
+        events.push({ expectedWord: expected[expectedIndex + extra], recognisedWord: null, eventType: "omission", action: eventAction(mode, "omission") });
+      }
+      expectedIndex += skipped;
+    } else { expectedIndex += 1; observedIndex += 1; }
   }
   while (expectedIndex < expected.length) { const state = states[expectedIndex]; state.attempts += 1; state.status = "incorrect"; events.push({ expectedWord: expected[expectedIndex], recognisedWord: null, eventType: "omission", action: eventAction(mode, "omission") }); expectedIndex += 1; }
   const resolvedStates = mergeAttemptHistory(states, attemptedStates, mode);

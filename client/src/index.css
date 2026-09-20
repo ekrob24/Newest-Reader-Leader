@@ -764,3 +764,15 @@ select:focus,
 
 .speech-mode-note { margin: 12px auto 0; max-width: 620px; font-size: 12px; font-weight: 700; color: #4d7a66; text-align: center; }
 .speech-mode-note.off-device { color: #8a5a12; }
+
+/* Where to listen first: the review queue, ordered by how unsure the software is. */
+.review-queue { margin: 18px 0; padding: 18px 20px 20px; border-radius: 18px; background: #fff; border: 1px solid #e6e9f2; }
+.review-queue-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; }
+.review-queue-list li { display: grid; grid-template-columns: 32px 1fr 74px 56px 84px; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: #f7f8fc; }
+.review-queue-list .queue-rank { font-weight: 700; color: #596382; text-align: center; }
+.review-queue-list .queue-word b { display: block; }
+.review-queue-list .queue-word small { color: #596382; }
+.review-queue-list .queue-score, .review-queue-list .queue-time, .review-queue-list .queue-no-clip { font-size: 12px; color: #596382; }
+.review-queue-list button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #d7dcec; background: #fff; border-radius: 10px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+.queue-unscored-note { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
+@media (max-width: 640px) { .review-queue-list li { grid-template-columns: 26px 1fr 64px; } .review-queue-list .queue-time { display: none; } }

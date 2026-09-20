@@ -613,7 +613,44 @@ export async function getTeacherSessionReview(scope: TenantScope, sessionId: str
     .innerJoin(childProfiles, eq(readingSessions.childProfileId, childProfiles.id))
     .where(eq(readingSessions.id, sessionId))
     .limit(1);
-  return review;
+  if (!review) return review;
+  return { ...review, reviewWords: await listReviewWords(scope, sessionId) };
+}
+
+/**
+ * The per-word rows the review queue is ordered from.
+ *
+ * `alignmentConfidence` is the column a forced aligner would write and is null on every row
+ * today, because this pipeline compares transcript text and has no per-word score. It is
+ * carried through as null rather than substituted, so the screen can say the queue is
+ * unordered instead of showing an order it does not have.
+ */
+export async function listReviewWords(scope: TenantScope, sessionId: string) {
+  const db = await scopedDb(scope);
+  const rows = await db.select({
+    wordEventId: readingWords.wordEventId,
+    tokenIndex: readingWords.tokenIndex,
+    referenceWord: readingWords.referenceWord,
+    heardWord: readingWords.heardWord,
+    judgement: readingWords.judgement,
+    resolution: readingWords.resolution,
+    alignmentConfidence: readingWords.alignmentConfidence,
+    startMs: readingWords.startMs,
+    endMs: readingWords.endMs,
+  }).from(readingWords).where(eq(readingWords.sessionId, sessionId)).orderBy(readingWords.tokenIndex);
+  return rows.map(row => ({
+    wordEventId: row.wordEventId,
+    tokenIndex: row.tokenIndex,
+    referenceWord: row.referenceWord,
+    heardWord: row.heardWord,
+    judgement: row.judgement,
+    resolution: row.resolution,
+    // A decimal column arrives as a string. Number("") is 0, which would rank an empty value
+    // as the least certain word in the reading, so parse only what is actually there.
+    score: row.alignmentConfidence === null || row.alignmentConfidence === "" ? null : Number(row.alignmentConfidence),
+    startMs: row.startMs,
+    endMs: row.endMs,
+  }));
 }
 
 export async function saveTeacherInterventionDecision(scope: TenantScope, sessionId: string, interventionIndex: number, teacherDecision: "confirmed" | "overridden") {

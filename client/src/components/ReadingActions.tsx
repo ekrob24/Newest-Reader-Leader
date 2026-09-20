@@ -125,7 +125,13 @@ export function SessionHighlightButton({ sessionId, label = "Hear a reading high
   return <SessionAudioControl sessionId={sessionId} label={label} highlight />;
 }
 
-export function SessionTranscriptPlayer({ sessionId, audioStatus }: { sessionId?: string | null; audioStatus?: AudioRetentionStatus | null }) {
+/**
+ * Loading a session's recording and playing one word's span out of it.
+ *
+ * Shared rather than copied because the review queue needs exactly this and a second copy
+ * would be a second place for the stop timer to leak or the seek to drift.
+ */
+export function useSessionWordClips(sessionId?: string | null) {
   const [playback, setPlayback] = useState<PlaybackData | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const clipStopTimerRef = useRef<number | null>(null);
@@ -170,6 +176,12 @@ export function SessionTranscriptPlayer({ sessionId, audioStatus }: { sessionId?
       }, Math.max(150, timing.endMs - timing.startMs + 150));
     } catch { toast("Your browser blocked audio playback. Please try again."); }
   };
+
+  return { playback, audioRef, audioUrl, load, hearWord };
+}
+
+export function SessionTranscriptPlayer({ sessionId, audioStatus }: { sessionId?: string | null; audioStatus?: AudioRetentionStatus | null }) {
+  const { playback, audioRef, audioUrl, load, hearWord } = useSessionWordClips(sessionId);
 
   if (audioStatus && !hasStoredAudio(audioStatus)) return <section className="transcript-player"><div><div className="kicker">Word-linked playback</div><h3>No recording to play for this reading.</h3><p>{audioAbsenceSummary(audioStatus)}. The saved transcript and word states below still support a teacher decision.</p></div><AudioUnavailableNote status={audioStatus} /></section>;
 

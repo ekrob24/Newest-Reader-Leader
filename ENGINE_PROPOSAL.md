@@ -566,3 +566,77 @@ The good half is worth keeping visible: `discarded_by_policy` means audio is sco
 discarded within the same request, so the ordinary production state is that nothing was ever
 stored. That part of the story is true. Only the retained-clip path promises what it does not
 do.
+
+---
+
+# The 21% was the cursor, not the recogniser
+
+The finding that reframes most of this document. It was found by reading prior art from a
+second build — `docs/Cursor_Reanchoring_Fix_v_003_2026-09-16.md`, which is in that zip and not
+in this repository — before looking at our own code.
+
+## What the prior art said
+
+A single mis-heard word pinned their alignment cursor for the rest of a reading. Every word
+after it, correctly recognised at up to 0.96 confidence, was compared against the wrong
+expected token and discarded: **11 of 14 tokens never assessed, coverage 21.4%.** Their
+conclusion, in their words: *"The recogniser was not the problem in these sessions. The tracker
+was."*
+
+The first human test of our live path reported **21%**.
+
+## The same defect, independently, in our TypeScript
+
+`deriveLiveWordStates` did not increment `expectedIndex` on a mismatch. `analyseReadingText`
+looked exactly one expected word ahead. Measured on this project's own passage:
+
+| transcript | live highlight | saved score |
+| --- | --- | --- |
+| perfect | 100% | 100% |
+| one `a` dropped, word 3 | **7%** | 98% |
+| one `the` dropped, word 11 | **17%** | 98% |
+| two adjacent dropped | **7%** | **7%** |
+| all thirteen function words | 5% | 10% |
+
+**The adjacent pair in this passage is `into the`, at words 5 and 6** — precisely the two words
+reported missing in the human test, and precisely what a recogniser drops when connected speech
+reduces them to one blur.
+
+So the 21% was never poor recognition. A dropped fifty-millisecond schwa forty seconds earlier
+pinned the cursor, and everything after it was scored against the wrong word.
+
+## What changed
+
+Bounded re-anchoring in both, window 3, chosen from a sweep rather than taste — k=2 leaves
+three adjacent drops collapsed, k=4 starts jumping to a later copy of a repeated word and costs
+a legitimate hesitation 14 points. After: 95–98% on every single- and double-drop case, 93% on
+three adjacent.
+
+And the progress bar, which counted raw transcript words while the highlight counted matched
+position, now counts matched position. Two elements telling a child where she is, from one
+source.
+
+## Any accent comparison made before this has to be re-run
+
+The prior art notes they had attributed part of an accent fairness gap to the recogniser when it
+was partly this bug: accent files produce more unstable observations, so they lose the cursor
+sooner and score worse for a reason that has nothing to do with accent.
+
+**The same applies to every fairness number in this project.** A fairness figure measured
+through a matcher that pins on the first dropped function word is measuring the matcher, and
+will read as a disadvantage to whichever cohort drops more function words. Any accent
+comparison run before this fix is void and must be re-run after it — including anything the
+multi-reader run would have inherited.
+
+## Held deliberately: function-word handling
+
+No special-casing of `a`, `the` or `into`. An isolated miss now costs one word instead of the
+passage, and it may never need handling at all. That is measured before it is designed.
+
+## The fixture lesson, again
+
+Our 327 tests stayed green throughout, because the browser journey emits a perfect transcript:
+the suite never contained the condition that breaks the code. The prior art reports the
+identical failure — a regression suite clean through 45 releases because its fixtures held zero
+unstable observations. A journey that drops a mid-passage word now exists, and with
+re-anchoring removed it fails.

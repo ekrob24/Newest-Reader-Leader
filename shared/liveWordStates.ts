@@ -163,3 +163,61 @@ export function keepWordsAlreadyRead(previous: LiveWordState[], next: LiveWordSt
     return { ...earlier, attempts: Math.max(earlier.attempts, state.attempts) };
   });
 }
+
+/**
+ * Where the reader is, as distinct from how she is doing.
+ *
+ * Two consumers were reading one stream. Judgement - correct, incorrect, self-corrected -
+ * must come from finalised results only: interim results are the recogniser thinking aloud,
+ * it revises them continuously, and deriving colour from them turned a word green, then red,
+ * then green, in a loop. Position has the opposite requirement. A real read measured one
+ * recogniser instance emitting nine finals across seventy-eight seconds, one of them 16,512ms
+ * after the interim that first carried its words, so a cursor waiting for finals sat twenty
+ * words behind a child who was reading perfectly well.
+ *
+ * So position is taken from finals plus the interim in flight, and judgement is left exactly
+ * where it was. The cost is that this index can move backwards when the recogniser revises
+ * itself. That is the right trade: a cursor that occasionally steps back is a cursor, and a
+ * colour that steps back is an accusation.
+ *
+ * It is deliberately the same derivation, not a second comparison written to agree with the
+ * first. Feed it the interim-inclusive transcript and read off the cursor it lands on.
+ */
+export function liveReadingPosition(states: LiveWordState[]): number {
+  const at = states.findIndex(state => state.status === "current");
+  return at === -1 ? states.length : at;
+}
+
+/**
+ * Which class a word on the reading page wears, given the two streams kept apart above.
+ *
+ * Pure, and out here rather than inline in the page, because this is the one place the split
+ * can be got wrong in a way a child sees. The rule it encodes:
+ *
+ *   - Judgement always wins. A word the finals have settled keeps its settled colour, cursor
+ *     or no cursor, so an interim can never repaint a word green or red.
+ *   - The cursor only ever marks a word nothing has judged yet.
+ *   - A monthly assessment shows the cursor and nothing else. That mode is meant to be quiet.
+ *
+ * `settled` is the status from the finals-only derivation; "current" there is now just the
+ * word after the last final, so it is read as unjudged rather than drawn as a second cursor.
+ */
+export function readerWordClass(settled: LiveWordState["status"] | undefined, atCursor: boolean, mode: LiveAssessmentMode): string {
+  const judgement = settled ?? "unread";
+  const unjudged = judgement === "unread" || judgement === "current";
+  if (mode === "MONTHLY_ASSESSMENT") return atCursor ? "current" : "";
+  if (atCursor && unjudged) return "current";
+  return unjudged ? "unread" : judgement;
+}
+
+/**
+ * The cursor, held inside the page on screen.
+ *
+ * Position follows interims and the page turns on finals, so position can run onto a page the
+ * child cannot see yet. Showing no cursor at all in exactly the lagging case this exists to
+ * fix would be the wrong answer, and turning the page on interims would strand her past words
+ * nothing has judged. Held to the page, the cursor says "at least here", which is true.
+ */
+export function cursorWithinPage(positionIndex: number, startWordIndex: number, endWordIndex: number): number {
+  return Math.min(Math.max(positionIndex, startWordIndex), endWordIndex);
+}

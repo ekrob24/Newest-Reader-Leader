@@ -239,6 +239,34 @@ neither does alone.
 
 Probe-sized, perhaps 4 hours, and not now.
 
+## Built, and not live — say it this way
+
+**The review queue and its measurement are built. The engine that would feed them is measured
+and not integrated.** That sentence is the accurate one and it is the one to use.
+
+**We cannot say the product ranks words by confidence for teacher review.** It does not.
+`alignmentConfidence` is null on every row of every saved reading, because the current
+pipeline compares transcript text and has no per-word score to write there. So
+`shared/reviewRanking.ts` is correct, tested and inert: in production the queue reports itself
+unordered and the screen says the words are in reading order, not review order.
+
+What is true today, and what is not:
+
+| | |
+| --- | --- |
+| The ordering, recall@k and review cost are implemented and tested | true |
+| The teacher review screen shows a per-word queue with audio spans | true |
+| That queue is ordered by confidence | **false today** — nothing writes a confidence |
+| The product ranks words by confidence for teacher review | **false today** |
+| Forced alignment can produce such a score | measured, and it does not yet separate cleanly |
+
+This is the fourth time in this project that something has existed without a live caller:
+`readingWords` unreadable through the tenant seam while writes succeeded, `onWordAttempt`
+declared and passed and never invoked, the derived word-score table built before anything
+called it, and now this. Every one was found late and none was found by reading the code. The
+only defence that has actually worked is writing it down where people read, so it is written
+down here.
+
 ## The measurement changed
 
 False-correction rate is the right metric for software that scores a child on its own. We are
@@ -269,6 +297,61 @@ Designed in now because it is expensive to retrofit:
   a word's score would partly measure the word. The standard answer is normalisation: compare
   a word's score to the distribution for *that word* across readers who read it correctly.
   The corpus above is exactly that distribution.
+
+## Words correct per minute, after the accuracy decision
+
+Accuracy came off the child's and the parent's surfaces because it is a machine judgement
+neither can check. WCPM was the same judgement in another unit — `correctWords / duration` —
+and it stayed, which made the accuracy removal half a change.
+
+It is not withheld outright, because unlike accuracy half of it is observed: duration is
+measured, not judged. So the numerator is fixed instead. WCPM is now counted from the words a
+teacher has confirmed, which is what a running record's WCPM has always meant; a
+machine-derived one was the deviation.
+
+**It is published only when the whole reading has been reviewed.** A figure from "confirmed so
+far" would be a new unfounded assertion wearing the old one's clothes, and it would move under
+a parent's feet as the teacher worked through the flags. Until then, an em dash.
+
+There is **no reviewed state on a reading session**, so this is inferred: every word whose
+judgement could be a miscue has a resolution of `teacher_confirmed` or `teacher_overridden`.
+`auto` does not count — it means the system settled the word without a human. A reading with
+no word rows at all returns false rather than true, because vacuous completeness is how a
+figure gets published for a reading nobody has seen. The inference is a real cost: if a new
+resolution value is added and not considered in `isReviewComplete`, this claim goes wrong
+quietly. A stored flag would drift the same way `countsAgainstScore` exists to prevent, so the
+inference is the better of two imperfect options — but it is the kind of thing to re-check
+whenever `wordResolutionValues` changes.
+
+When a teacher confirms real errors the figure drops, and it is left to drop. No floor, no
+smoothing.
+
+## Where a machine figure can still reach a person
+
+Checked rather than assumed, because a screen is not the only way out of a system.
+
+**There is no subject-access export in this codebase.** Searched for and absent. An Article 15
+request returns the child's personal data, and a machine-derived accuracy held about that child
+is personal data, so the obligation is unmet rather than leaking — and when that export is
+built, the figure must be excluded or carry an explicit label saying it is an unverified
+machine estimate no teacher has confirmed. `server/exportedFigures.test.ts` sweeps every path
+that exists today and is where the new one belongs on the day it is written.
+
+| path | audience | machine figure |
+| --- | --- | --- |
+| `reports.download` (markdown) | role-gated per audience | removed for child and parent |
+| `reports.downloadPdf` | role-gated per audience | removed for child and parent |
+| `sessions.childProgress` | child, parent, linked teacher | stripped at the boundary |
+| `dashboards.parent` | parent | stripped at source |
+| `sessions.processAndSave` / `save` | child | stripped, including the freshest copy |
+| `sessions.audioUrl` | anyone linked to the profile | audio, transcript and timings only |
+| `reports.monthlyTrend` / `monthlyTrendCsv` | **teacher only** | class-averaged story match |
+| `reports.classVariationReviewPdf` | **teacher only** | none |
+| `irishVariants.csv` | **teacher only** | none |
+| `sessions.teacherReview` | **teacher only** | the full session row |
+
+One thing to keep in mind about the trend export: it is a class average, but a class of a
+single child makes that average an individual figure.
 
 ## Still unmeasured
 

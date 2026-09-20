@@ -17,3 +17,40 @@ export function shortSampleNote(durationSeconds: number) {
   if (isPaceMeaningful(durationSeconds)) return null;
   return `This read lasted ${Math.max(0, Math.round(durationSeconds))}s, which is too short for reading speed to mean much. The words and accuracy still count.`;
 }
+
+/**
+ * Words correct per minute, from the words a teacher has confirmed.
+ *
+ * A running record's WCPM has always meant words the assessor counted as correct. A
+ * machine-derived one was the deviation; this is the measure itself.
+ *
+ * Returns null — an em dash on screen — in three cases, and they are different kinds of
+ * "we do not know":
+ *
+ *   the reading has not been fully reviewed. A figure from "confirmed so far" is a new
+ *   unfounded assertion wearing the old one's clothes, and it would move under a parent's
+ *   feet as the teacher worked through the flags. The em dash holds until the last flagged
+ *   word has a decision, not until the first.
+ *
+ *   the sample is too short for pace to mean anything, which is the existing rule above and
+ *   is unchanged by any amount of reviewing.
+ *
+ *   the duration is not a usable number.
+ *
+ * When a teacher confirms real errors the figure drops, and it is left to drop. There is no
+ * floor and no smoothing: a pace that cannot go down is not a measurement.
+ */
+export function settledWordsCorrectPerMinute(input: {
+  settledCorrectWords: number;
+  durationSeconds: number;
+  reviewComplete: boolean;
+}): number | null {
+  if (!input.reviewComplete) return null;
+  if (!isPaceMeaningful(input.durationSeconds)) return null;
+  if (!Number.isFinite(input.settledCorrectWords) || input.settledCorrectWords < 0) return null;
+  return Math.round((input.settledCorrectWords / input.durationSeconds) * 60);
+}
+
+/** One line for a surface showing the gap where an unreviewed reading's pace would be. */
+export const PACE_AWAITS_REVIEW =
+  "Reading speed appears once the teacher has finished reviewing this reading.";

@@ -11,15 +11,15 @@ import {
 const progress = {
   profile: { displayName: "Test Reader" },
   sessions: [
-    { id: "A", storyTitle: "One", accuracy: 91, wordsCorrectPerMinute: 102 },
-    { id: "B", storyTitle: "Two", accuracy: 64, wordsCorrectPerMinute: 88 },
+    { id: "A", storyTitle: "One", accuracy: 91, wordsCorrectPerMinute: 102, settledWordsCorrectPerMinute: 97 },
+    { id: "B", storyTitle: "Two", accuracy: 64, wordsCorrectPerMinute: 88, settledWordsCorrectPerMinute: null },
   ],
   summary: { sessionsCompleted: 2, averageAccuracy: 78, averageWcpm: 95, practiceWords: ["lantern"] },
 };
 
 const result = {
   session: { id: "A", storyTitle: "One", accuracy: 91, wordsCorrectPerMinute: 102 },
-  analysis: { accuracy: 91, firstPassAccuracy: 84, pace: 102, correctWords: 38 },
+  analysis: { accuracy: 91, firstPassAccuracy: 84, pace: 102, firstPassWcpm: 96, correctWords: 38 },
 };
 
 describe("who sees accuracy", () => {
@@ -50,7 +50,7 @@ describe("removing the field rather than hiding it", () => {
   it("drops accuracy from a session and leaves everything else alone", () => {
     const session = withoutSessionAccuracy(progress.sessions[0]);
     expect("accuracy" in session).toBe(false);
-    expect(session).toEqual({ id: "A", storyTitle: "One", wordsCorrectPerMinute: 102 });
+    expect(session).toEqual({ id: "A", storyTitle: "One", wordsCorrectPerMinute: 102, settledWordsCorrectPerMinute: 97 });
   });
 
   it("drops the average from a summary and leaves everything else alone", () => {
@@ -82,6 +82,13 @@ describe("a child-progress payload", () => {
       expect("averageAccuracy" in payload.summary).toBe(false);
     });
 
+    it(`sees the settled pace and not the machine one as a ${audience}`, () => {
+      const payload = progressForAudience(progress, audience);
+      expect(payload.sessions.every(session => !("wordsCorrectPerMinute" in session))).toBe(true);
+      expect(payload.sessions.map(session => (session as { settledWordsCorrectPerMinute: number | null }).settledWordsCorrectPerMinute))
+        .toEqual([97, null]);
+    });
+
     it(`keeps everything a ${audience} still needs`, () => {
       const payload = progressForAudience(progress, audience);
       expect(payload.profile).toEqual({ displayName: "Test Reader" });
@@ -105,10 +112,17 @@ describe("the reply a child gets on finishing a reading", () => {
     expect("firstPassAccuracy" in payload.analysis).toBe(false);
   });
 
-  it("keeps the session identifier and the pace, which the report screen needs", () => {
+  it("also withholds the machine pace, which is that judgement in another unit", () => {
+    const payload = readingResultForAudience(result, "child");
+    expect("wordsCorrectPerMinute" in payload.session).toBe(false);
+    expect("pace" in payload.analysis).toBe(false);
+    expect("firstPassWcpm" in payload.analysis).toBe(false);
+  });
+
+  it("keeps what the report screen still needs", () => {
     const payload = readingResultForAudience(result, "child");
     expect(payload.session.id).toBe("A");
-    expect(payload.analysis.pace).toBe(102);
+    expect(payload.session.storyTitle).toBe("One");
     expect(payload.analysis.correctWords).toBe(38);
   });
 

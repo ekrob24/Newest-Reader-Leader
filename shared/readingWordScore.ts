@@ -53,3 +53,32 @@ export function accuracyFromWords(words: ReadonlyArray<{ judgement: WordJudgemen
   const counted = words.filter(countsAgainstScore).length;
   return Math.round(((words.length - counted) / words.length) * 100);
 }
+
+/**
+ * Whether a teacher has finished reviewing this reading.
+ *
+ * There is no reviewed flag on a reading session. This is inferred, and it has to be, because
+ * the only record of review is per word: `resolution` on each row. Inferring it is not free —
+ * it means "review is complete" is a derived claim that could go wrong if a new resolution
+ * value is added and not considered here — but a stored flag would be the same drift
+ * `countsAgainstScore` exists to avoid, so it is the better of the two.
+ *
+ * Complete means every word that could be a miscue has had a human decide. A word whose
+ * judgement can never be an error needs no decision. A miscue left `unreviewed`, or resolved
+ * `auto` — which means the system settled it without a human — is not decided.
+ *
+ * A reading with no words at all returns false rather than true: nothing is known about it,
+ * and vacuous completeness is how a figure gets published for a reading nobody has seen.
+ */
+export function isReviewComplete(words: ReadonlyArray<{ judgement: WordJudgement; resolution: WordResolution }>): boolean {
+  if (!words.length) return false;
+  return words.every(word =>
+    !isErrorJudgement(word.judgement)
+    || word.resolution === "teacher_confirmed"
+    || word.resolution === "teacher_overridden");
+}
+
+/** Words not counting against the reading once the teacher's decisions are applied. */
+export function settledCorrectWordCount(words: ReadonlyArray<{ judgement: WordJudgement; resolution: WordResolution }>): number {
+  return words.length - words.filter(countsAgainstScore).length;
+}

@@ -16,6 +16,12 @@
  *  So accuracy stays. It is what orders a teacher's review queue - the readings least likely to
  *  be right, first. It simply stops being rendered to the two audiences who cannot check it.
  *
+ *  Words correct per minute goes the same way and for the same reason: it is correctWords over
+ *  duration, so it is that same unconfirmed judgement in a different unit. Unlike accuracy it
+ *  is not withheld outright, because half of it - the duration - is observed rather than judged.
+ *  It is recomputed from the words a teacher has confirmed and published only once she has
+ *  finished the reading, which is what a running record's WCPM has always meant.
+ *
  *  This is a removal at the server boundary rather than in a component. A field that is not in
  *  the payload cannot be put back by a later layout change, and the tests below assert on the
  *  payload rather than on the markup.
@@ -48,8 +54,13 @@ export function withoutSummaryAccuracy<T extends { averageAccuracy: unknown }>(s
   return rest;
 }
 
+export function withoutMachinePace<T extends { wordsCorrectPerMinute: unknown }>(session: T): Omit<T, "wordsCorrectPerMinute"> {
+  const { wordsCorrectPerMinute: _withheld, ...rest } = session;
+  return rest;
+}
+
 type ProgressLike = {
-  sessions: { accuracy: unknown }[];
+  sessions: ({ accuracy: unknown; wordsCorrectPerMinute: unknown })[];
   summary: { averageAccuracy: unknown };
 };
 
@@ -59,14 +70,17 @@ export function progressForAudience<T extends ProgressLike>(progress: T, audienc
   if (seesAccuracy(audience)) return progress;
   return {
     ...progress,
-    sessions: progress.sessions.map(withoutSessionAccuracy),
+    // The stored wordsCorrectPerMinute is correctWords / duration, and correctWords is the
+    // same unconfirmed machine judgement the accuracy figure is. It goes the same way; what
+    // stays is settledWordsCorrectPerMinute, which is null until a teacher has finished.
+    sessions: progress.sessions.map(session => withoutMachinePace(withoutSessionAccuracy(session))),
     summary: withoutSummaryAccuracy(progress.summary),
   };
 }
 
 type ReadingResultLike = {
-  session: { accuracy: unknown };
-  analysis: { accuracy: unknown; firstPassAccuracy: unknown };
+  session: { accuracy: unknown; wordsCorrectPerMinute: unknown };
+  analysis: { accuracy: unknown; firstPassAccuracy: unknown; pace: unknown; firstPassWcpm: unknown };
 };
 
 /** The reply a child gets the moment she finishes reading. It carried the freshly computed
@@ -76,7 +90,8 @@ type ReadingResultLike = {
  *  back to the reader. */
 export function readingResultForAudience<T extends ReadingResultLike>(result: T, audience: ReportAudience) {
   if (seesAccuracy(audience)) return result;
-  const { accuracy: _sessionAccuracy, ...session } = result.session;
-  const { accuracy: _analysisAccuracy, firstPassAccuracy: _firstPass, ...analysis } = result.analysis;
+  const { accuracy: _sessionAccuracy, wordsCorrectPerMinute: _sessionPace, ...session } = result.session;
+  const { accuracy: _analysisAccuracy, firstPassAccuracy: _firstPass,
+          pace: _pace, firstPassWcpm: _firstPassPace, ...analysis } = result.analysis;
   return { ...result, session, analysis };
 }

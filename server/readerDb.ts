@@ -39,13 +39,14 @@ import { scopedDb, unscopedDb, type TenantScope } from "./tenantScope";
 import { storagePut } from "./storage";
 import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek, type TrendDateRange } from "./learningAnalytics";
 import { progressForAudience } from "../shared/accuracyAudience";
+import { settledWordsCorrectPerMinute } from "../shared/readingPace";
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
 import { newSessionId } from "../shared/sessionId";
 import { resolveCaptureTime } from "../shared/captureTime";
 import { buildReadingWordRows, resolutionsByWordEventId, type ReadingWordProvenance } from "../shared/readingWordRows";
-import { accuracyFromWords, countsAgainstScore } from "../shared/readingWordScore";
+import { accuracyFromWords, countsAgainstScore, isReviewComplete, settledCorrectWordCount } from "../shared/readingWordScore";
 
 /**
  * The engine and policy behind a word judgement. `provider` names the alignment engine, not
@@ -680,8 +681,46 @@ export async function saveTeacherInterventionDecision(scope: TenantScope, sessio
  *  never stored. Null when the session predates per-word rows. */
 export async function getSettledAccuracy(scope: TenantScope, sessionId: string) {
   const db = await scopedDb(scope);
+  const [session] = await db.select({ durationSeconds: readingSessions.durationSeconds }).from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
   const words = await db.select({ judgement: readingWords.judgement, resolution: readingWords.resolution }).from(readingWords).where(eq(readingWords.sessionId, sessionId));
-  return { wordCount: words.length, accuracy: accuracyFromWords(words), countedAgainst: words.filter(countsAgainstScore).length };
+  const reviewComplete = isReviewComplete(words);
+  return {
+    wordCount: words.length,
+    accuracy: accuracyFromWords(words),
+    countedAgainst: words.filter(countsAgainstScore).length,
+    reviewComplete,
+    // Null until the last flagged word has a decision. A pace from "confirmed so far" would
+    // move under the reader's feet as the teacher worked.
+    wordsCorrectPerMinute: settledWordsCorrectPerMinute({
+      settledCorrectWords: settledCorrectWordCount(words),
+      durationSeconds: session?.durationSeconds ?? 0,
+      reviewComplete,
+    }),
+  };
+}
+
+/**
+ * Settled pace for many sessions at once, so a progress payload does not run one query per
+ * saved reading. Sessions with no word rows are absent from the map, which is the same answer
+ * as an unreviewed one: no figure.
+ */
+export async function settledPaceBySession(scope: TenantScope, sessions: ReadonlyArray<{ id: string; durationSeconds: number }>) {
+  const paces = new Map<string, number | null>();
+  if (!sessions.length) return paces;
+  const db = await scopedDb(scope);
+  const rows = await db.select({ sessionId: readingWords.sessionId, judgement: readingWords.judgement, resolution: readingWords.resolution })
+    .from(readingWords).where(inArray(readingWords.sessionId, sessions.map(session => session.id)));
+  const grouped = new Map<string, { judgement: typeof rows[number]["judgement"]; resolution: typeof rows[number]["resolution"] }[]>();
+  for (const row of rows) grouped.set(row.sessionId, [...(grouped.get(row.sessionId) ?? []), row]);
+  for (const session of sessions) {
+    const words = grouped.get(session.id) ?? [];
+    paces.set(session.id, settledWordsCorrectPerMinute({
+      settledCorrectWords: settledCorrectWordCount(words),
+      durationSeconds: session.durationSeconds,
+      reviewComplete: isReviewComplete(words),
+    }));
+  }
+  return paces;
 }
 
 export async function getAssignedMaterialForChild(scope: TenantScope, childUserId: number, materialId: number) {
@@ -744,17 +783,37 @@ export async function getChildProgress(scope: TenantScope, childProfileId: numbe
   const sessions = await db.select().from(readingSessions).where(eq(readingSessions.childProfileId, childProfileId)).orderBy(desc(readingSessions.createdAt)).limit(36);
   const total = sessions.length || 1;
   const averageAccuracy = Math.round(sessions.reduce((sum, session) => sum + session.accuracy, 0) / total);
-  const averageWcpm = Math.round(sessions.reduce((sum, session) => sum + session.wordsCorrectPerMinute, 0) / total);
   const practiceWords = Array.from(new Set(sessions.flatMap(session => session.practiceWords))).slice(0, 4);
+  // Words correct per minute, from the words a teacher confirmed rather than the ones the
+  // recogniser guessed. A reading still under review contributes nothing: averaging a
+  // partly-reviewed figure in would put the same unfounded assertion back, one step removed.
+  const settledPaces = await settledPaceBySession(scope, sessions);
+  const sessionsWithSettledPace = sessions.map(session => ({
+    ...session,
+    settledWordsCorrectPerMinute: settledPaces.get(session.id) ?? null,
+  }));
+  const publishedPaces = sessionsWithSettledPace
+    .map(session => session.settledWordsCorrectPerMinute)
+    .filter((pace): pace is number => pace !== null);
+  const averageWcpm = publishedPaces.length
+    ? Math.round(publishedPaces.reduce((sum, pace) => sum + pace, 0) / publishedPaces.length)
+    : null;
   return {
     profile,
-    sessions,
+    sessions: sessionsWithSettledPace,
     quizHistory: await getQuizHistory(scope, childProfileId),
     assessmentTrend: buildMonthlyAssessmentTrend(sessions),
     minutesReadThisWeek: minutesReadThisWeek(sessions),
     learnerSettings: await getLearnerReadingSettings(scope, childProfileId),
     irishVariantContext: await getIrishVariantContextForChild(scope, childProfileId),
-    summary: { sessionsCompleted: sessions.length, averageAccuracy, averageWcpm, practiceWords },
+    summary: {
+      sessionsCompleted: sessions.length,
+      averageAccuracy,
+      averageWcpm,
+      /** How many saved readings the averageWcpm above is actually made of. */
+      readingsWithSettledPace: publishedPaces.length,
+      practiceWords,
+    },
   };
 }
 

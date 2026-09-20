@@ -68,9 +68,11 @@ From the app running at `http://localhost:3100`:
 1. **Continue as Teacher** → password `reader-teacher-2026` → **Open my reading space**.
 2. Scroll to **Saved reading sessions**.
 3. On the row **The Lantern in the Garden · last week**, click **Review word by word**.
-4. The running record opens. Note the figures at the top: **After your decisions 100%** and
-   **Reading speed, after your decisions 93 WCPM**. Nothing counts against this child yet,
-   because no human has confirmed anything. Two moments below say **Decision needed**.
+4. The running record opens. **After your decisions** reads **100%**, and **Reading speed**
+   reads **—** with the line "Reading speed appears once the teacher has finished reviewing
+   this reading." Nothing counts against this child yet, because no human has confirmed
+   anything, and the pace is withheld for the same reason. Two moments below say
+   **Decision needed**.
 5. Under **Other flagged moments**, find the word **hedgehog**. Click **Confirm event**.
    → The figures change in front of you: **98%** and **91 WCPM**. Confirming is what lets a
    flag count.

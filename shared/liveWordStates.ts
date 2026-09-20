@@ -9,6 +9,28 @@ export type LiveWordState = {
 };
 import { matchExpectedReadingWord, type EducatorApprovedIrishVariant, type ReadingLanguageSupport } from "./dialectSupport";
 
+/**
+ * How far ahead the cursor looks for the word it just heard.
+ *
+ * Chosen from a sweep over the real passage, not from taste. Recovery and cost both move with
+ * it, in opposite directions, and 3 is where they cross:
+ *
+ *   k=1  a single dropped word recovers, two dropped in a row still collapse to 14%
+ *   k=2  two in a row recover (95%), three in a row still collapse (14%)
+ *   k=3  three in a row recover (93%), and a child who repeats three words is still 100%
+ *   k=4  four in a row recover, but the repeated-words case falls to 86%
+ *   k=10 the same recovery, and the repeated-words case falls to 67%
+ *
+ * The cost is not hypothetical: this passage contains "the" five times, so a wide enough
+ * window reaches a later copy of a word the child has not got to yet, jumps there, and marks
+ * everything in between as unread. k=4 is where that starts. 3 is therefore the largest value
+ * that buys recovery for nothing, and the run it does not survive - four dropped words in a
+ * row - is a reading that has gone wrong in a way no cursor should paper over.
+ *
+ * The full sweep is reproduced in shared/reanchoring.test.ts.
+ */
+export const REANCHOR_LOOKAHEAD = 3;
+
 const wordPattern = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
 const normalise = (word: string) => word.toLowerCase().replace(/[^a-z']/g, "");
 const tokenize = (text: string) => (text.match(wordPattern) ?? []).map(normalise);
@@ -61,7 +83,47 @@ export function deriveLiveWordStates(expectedText: string, transcript: string, m
       state.status = state.attempts > 1 ? "retried_correct" : "correct";
       expectedIndex += 1;
     } else {
-      state.status = "incorrect";
+      // Bounded re-anchoring.
+      //
+      // This branch used to leave expectedIndex where it was. One word the recogniser dropped
+      // - and in connected speech that is almost always a function word, "a" being a fifty
+      // millisecond unstressed schwa - pinned the cursor for the rest of the reading. Every
+      // following word, correctly said and correctly heard, was compared against the wrong
+      // expected word and marked incorrect. Measured on the real passage: one dropped "a" took
+      // the highlight from 42 of 42 words to 3.
+      //
+      // So when the heard word does not match here, look a little way ahead for one it does
+      // match. If it is there, the child has moved on and the words in between were not read:
+      // mark them and follow her. If it is not, keep the old behaviour - she is saying
+      // something that is not in the next few words of the passage, and guessing would be
+      // worse than waiting.
+      let jump = 0;
+      for (let ahead = 1; ahead <= REANCHOR_LOOKAHEAD; ahead += 1) {
+        const candidate = states[expectedIndex + ahead];
+        // Deliberately no special case for a word the child moved on from. A guard here was
+        // measured and removed: it cost eleven words of recovery on a transcript that needed
+        // to re-anchor past one, and protected nothing, because the pass at the end of this
+        // function re-asserts every moved-on word's status and attempt count regardless.
+        if (!candidate) break;
+        if (matchExpectedReadingWord(candidate.text, heardWord, languageSupport, educatorApprovedVariants).matches) {
+          jump = ahead;
+          break;
+        }
+      }
+      if (jump > 0) {
+        for (let skipped = 1; skipped < jump; skipped += 1) {
+          const passed = states[expectedIndex + skipped];
+          passed.status = "incorrect";
+          passed.attempts += 1;
+        }
+        state.status = "incorrect";
+        const landed = states[expectedIndex + jump];
+        landed.attempts += 1;
+        landed.status = landed.attempts > 1 ? "retried_correct" : "correct";
+        expectedIndex += jump + 1;
+      } else {
+        state.status = "incorrect";
+      }
     }
     heardIndex += 1;
   }

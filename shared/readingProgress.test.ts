@@ -23,13 +23,21 @@ describe("the reading progress bar", () => {
   });
 
   it("follows the matcher, not the transcript, when the matcher loses the reader", () => {
-    // One dropped function word pins the cursor. The bar must stop where the highlight stops.
-    const transcript = dropFirst(PERFECT, "a");
+    // This used one dropped function word, which was enough to pin the cursor. Bounded
+    // re-anchoring since fixed that case, so the example moved to one the matcher still cannot
+    // follow: four expected words gone in a row, past the three-word window. The assertion is
+    // unchanged - where the highlight stops, the bar stops.
+    const transcript = PERFECT.split(" ").filter((_, index) => index < 5 || index > 8).join(" ");
     const reached = barWords(states(transcript));
-    expect(reached).toBeLessThan(10);
+    expect(reached).toBeLessThan(15);
     // The old expression would have said the child was nearly finished.
-    expect(oldBarWords(transcript)).toBe(41);
-    expect(oldBarWords(transcript)).toBeGreaterThan(reached * 4);
+    expect(oldBarWords(transcript)).toBe(38);
+    expect(oldBarWords(transcript)).toBeGreaterThan(reached * 2);
+  });
+
+  it("now reaches the end of a reading the matcher can re-anchor through", () => {
+    // The same dropped function word that used to stop the bar at three words.
+    expect(barWords(states(dropFirst(PERFECT, "a")))).toBeGreaterThanOrEqual(41);
   });
 
   it("never reports more progress than there are words in the passage", () => {

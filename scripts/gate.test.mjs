@@ -152,14 +152,33 @@ describe("the runner's own tests", () => {
   });
 });
 
-describe("the one recorded exception", () => {
-  const recorded = EXCEPTIONS[0];
-  const skewed = { clockSkewMinutes: 60, sessionTz: "UTC", globalTz: "SYSTEM" };
+describe("the exception mechanism", () => {
+  // Tested against a fixture entry, not against whatever EXCEPTIONS happens to hold, so the
+  // mechanism stays covered when the list is empty - which it is, and which is the point:
+  // the one entry it held was removed when its cause was refuted.
+  const recorded = {
+    file: "sessionIdentity.integration.test.ts",
+    name: "session identity prefers server time for a tablet whose clock is far out, without discarding the reading",
+    reason: "pre-existing timezone skew",
+    recorded: "2026-09-20",
+    holdsWhen: measured => typeof measured?.clockSkewMinutes === "number" && Math.abs(measured.clockSkewMinutes) > 1,
+  };
+  const list = [recorded];
+  const skewed = { clockSkewMinutes: 60 };
   const theFailure = { file: recorded.file, name: recorded.name, message: "AssertionError: expected 3599708 to be less than 60000" };
   const passingGate = summariseVitest(vitestReport([gateFile([{ status: "passed" }])], { numPassedTests: 372, numFailedTests: 1 }));
 
-  it("excuses exactly that test, on a machine where the skew is actually there", () => {
+  it("excuses nothing today, because the list is empty", () => {
+    // The entry that was here excused a failure on a cause the measurement then refuted.
+    expect(EXCEPTIONS).toEqual([]);
     const { blocking, excused } = partitionFailures([theFailure], skewed);
+    expect(excused).toEqual([]);
+    expect(blocking).toEqual([theFailure]);
+    expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
+  });
+
+  it("excuses exactly the named test, on a machine where the condition holds", () => {
+    const { blocking, excused } = partitionFailures([theFailure], skewed, list);
     expect(blocking).toEqual([]);
     expect(excused).toHaveLength(1);
     expect(excused[0].reason).toBe("pre-existing timezone skew");
@@ -167,18 +186,18 @@ describe("the one recorded exception", () => {
     expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(true);
   });
 
-  it("does not excuse it on a machine with no skew - not established is not excused", () => {
+  it("does not excuse it where the condition does not hold - not established is not excused", () => {
     for (const measured of [{ clockSkewMinutes: 0 }, { clockSkewMinutes: 1 }, null, undefined, {}]) {
-      const { blocking, excused } = partitionFailures([theFailure], measured);
+      const { blocking, excused } = partitionFailures([theFailure], measured, list);
       expect(excused).toEqual([]);
       expect(blocking).toHaveLength(1);
       expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
     }
   });
 
-  it("does not let the exception swallow a second failure alongside it", () => {
+  it("does not let an exception swallow a second failure alongside it", () => {
     const other = { file: "reviewQueue.integration.test.ts", name: "orders the queue", message: "expected 3 to be 2" };
-    const { blocking, excused } = partitionFailures([theFailure, other], skewed);
+    const { blocking, excused } = partitionFailures([theFailure, other], skewed, list);
     expect(excused.map(item => item.name)).toEqual([recorded.name]);
     expect(blocking).toEqual([other]);
     expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
@@ -186,20 +205,19 @@ describe("the one recorded exception", () => {
 
   it("does not cover a different test in the same file", () => {
     const sibling = { file: recorded.file, name: "session identity keeps a plausible device clock and marks it authoritative", message: "boom" };
-    const { blocking, excused } = partitionFailures([sibling], skewed);
+    const { blocking, excused } = partitionFailures([sibling], skewed, list);
     expect(excused).toEqual([]);
     expect(blocking).toEqual([sibling]);
-    expect(verdict(passingGate, bothJourneysPass, blocking)).toBe(false);
   });
 
   it("does not cover the same test name arriving from a different file", () => {
     const elsewhere = { file: "somethingElse.integration.test.ts", name: recorded.name, message: "boom" };
-    expect(partitionFailures([elsewhere], skewed).blocking).toEqual([elsewhere]);
+    expect(partitionFailures([elsewhere], skewed, list).blocking).toEqual([elsewhere]);
   });
 
   it("still goes red when the gate numbers move, exception or not", () => {
     const movedGate = summariseVitest(vitestReport([gateFile([{ fullName: "walks the demo", status: "failed" }])], { numFailedTests: 2 }));
-    const { blocking } = partitionFailures([theFailure], skewed);
+    const { blocking } = partitionFailures([theFailure], skewed, list);
     expect(blocking).toEqual([]);
     expect(verdict(movedGate, bothJourneysPass, blocking)).toBe(false);
   });
@@ -209,12 +227,12 @@ describe("the one recorded exception", () => {
       pwSpec("the demo journey", false),
       pwSpec("a dropped function word does not stop the reading", true),
     ]));
-    const { blocking } = partitionFailures([theFailure], skewed);
+    const { blocking } = partitionFailures([theFailure], skewed, list);
     expect(verdict(passingGate, journeys, blocking)).toBe(false);
   });
 
-  it("carries a reason and a date, so the waiver has a source", () => {
-    for (const item of EXCEPTIONS) {
+  it("requires every entry that ever exists to carry a reason, a date and a condition", () => {
+    for (const item of [...EXCEPTIONS, recorded]) {
       expect(item.reason).toBeTruthy();
       expect(item.recorded).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(typeof item.holdsWhen).toBe("function");

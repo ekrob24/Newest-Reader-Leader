@@ -14,7 +14,7 @@
  *   node scripts/gate.mjs --mysql-password "yourpassword"
  */
 import { spawn } from "node:child_process";
-import { measureSkewMinutes } from "./clock-skew.mjs";
+import { clockReport, measureClocks } from "./clock-skew.mjs";
 import { createConnection } from "node:net";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,17 +37,14 @@ export const OWN_TEST_FILE = "gate.test.mjs";
  * one, is not covered and turns the run red.
  */
 export const EXCEPTIONS = [
-  {
-    file: "sessionIdentity.integration.test.ts",
-    name: "session identity prefers server time for a tablet whose clock is far out, without discarding the reading",
-    reason: "pre-existing timezone skew",
-    recorded: "2026-09-20",
-    // readingSessions.createdAt is DEFAULT now(), so MySQL writes it in the MySQL session's
-    // timezone and mysql2 reads it back in this machine's. Where those differ, a
-    // server-generated timestamp is read back that far out, and this assertion compares one
-    // against Date.now(). Excused only on a machine where that difference is actually present.
-    holdsWhen: measured => typeof measured?.clockSkewMinutes === "number" && Math.abs(measured.clockSkewMinutes) > 1,
-  },
+  // Empty, and it was not always. On 2026-09-20 this held one entry excusing
+  // sessionIdentity.integration.test.ts on a "pre-existing timezone skew". The entry was
+  // removed the same day, because the cause was refuted: scripts/clock-skew.mjs measured
+  // MySQL's clock against the machine's on the affected laptop and found them exactly
+  // together. The failing assertion is still failing and is now unexplained, so it is red.
+  //
+  // Kept as a record of the shape an entry takes, and of what removed the last one: an
+  // exception here survives only as long as the measurement behind it does.
 ];
 
 /**
@@ -218,13 +215,18 @@ async function main() {
   const vitestReport = readJson(vitestFile);
   const vitest = summariseVitest(vitestReport);
 
-  // Measure the one condition an exception depends on, on this machine, now. Only bother when
-  // something actually failed - there is nothing to excuse otherwise.
+  // Measure the clocks when something failed, both because an exception's condition is
+  // re-checked against what is true on this machine and because a failing run should arrive
+  // with the measurement already taken rather than needing a second trip.
   const failures = vitestFailures(vitestReport);
   let measured = null;
+  let clockLines = [];
   if (failures.length) {
-    const skew = await measureSkewMinutes(env.DATABASE_URL);
-    measured = skew ? { clockSkewMinutes: skew.skewMinutes, globalTz: skew.globalTz, sessionTz: skew.sessionTz } : null;
+    measured = await measureClocks(env.DATABASE_URL);
+    clockLines = clockReport(measured, {
+      machineTz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      offsetHours: -new Date().getTimezoneOffset() / 60,
+    });
   }
   const { blocking, excused } = partitionFailures(failures, measured);
 
@@ -255,7 +257,7 @@ async function main() {
     server.kill();
   }
 
-  report({ vitest, journeys, vitestRun, playwrightReport, blocking, excused, measured });
+  report({ vitest, journeys, vitestRun, playwrightReport, blocking, excused, clockLines });
 }
 
 /**
@@ -299,7 +301,7 @@ async function freshDatabase(env, owns) {
   ] });
 }
 
-function report({ vitest, journeys, vitestRun, playwrightReport, blocking, excused, measured }) {
+function report({ vitest, journeys, vitestRun, playwrightReport, blocking, excused, clockLines }) {
   const line = "-".repeat(64);
   say(`\n${line}\nRESULT\n${line}`);
 
@@ -336,7 +338,10 @@ function report({ vitest, journeys, vitestRun, playwrightReport, blocking, excus
       say(`  ${failure.file} - ${failure.name}`);
       say(`      ${failure.reason}, recorded ${failure.recorded}`);
     }
-    if (measured) say(`      measured on this machine: MySQL session time_zone ${measured.sessionTz}, clock skew ${measured.clockSkewMinutes} minutes`);
+  }
+  if (clockLines.length) {
+    say("\nThe clocks, measured on this machine just now:");
+    for (const line of clockLines) say(`  ${line}`);
   }
 
   const green = verdict(vitest, journeys, blocking);

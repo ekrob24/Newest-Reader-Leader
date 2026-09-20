@@ -1,0 +1,14 @@
+input/
+output-local/
+__pycache__/
+*.pyc
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.webm
+*.zip
+.git/
+.gitignore
+.env

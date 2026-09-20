@@ -21,6 +21,13 @@ import { readFileSync } from "node:fs";
  */
 const MINIMUM_TESTS = 300;
 
+/**
+ * This counts what vitest collected, and vitest's `include` in vitest.config.ts names
+ * server/, shared/ and client/ explicitly. `asr-benchmark/` is outside that list and its tests
+ * are Python, so importing it does not move this number. If the count ever changes without a
+ * test being added or removed, check that glob before anything else.
+ */
+
 const reportPath = process.argv[2];
 if (!reportPath) {
   console.error("usage: assert-test-coverage.mjs <vitest-json-report>");

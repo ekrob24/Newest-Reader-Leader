@@ -1,0 +1,399 @@
+{
+  "benchmark_version": "rl-stage4-benchmark-v1.1",
+  "config_version": [
+    "rl-stage4-dev-fixture-v1"
+  ],
+  "stage_pass": false,
+  "metrics": {
+    "split": "holdout",
+    "overall": {
+      "counts": {
+        "sessions": 2,
+        "speakers": 2,
+        "events": 9,
+        "safe_events": 4,
+        "false_corrections": 0,
+        "corrective_events": 3,
+        "gold_intervention_events": 3,
+        "valid_accent_variants": 1,
+        "abstentions": 1,
+        "non_correct_events": 5,
+        "double_annotated_sessions": 2,
+        "complete_reference_sessions": 0,
+        "traceable_corrective_events": 3
+      },
+      "wer": {
+        "reference_words": 16,
+        "substitutions": 3,
+        "deletions": 0,
+        "insertions": 0,
+        "rate": 0.1875
+      },
+      "fcr": {
+        "rate": 0.0,
+        "lower_95": 0.0,
+        "upper_95": 0.48990002040399916
+      },
+      "false_action_share": 0.0,
+      "safe_stay_silent_rate": 1.0,
+      "corrective_action_precision": 1.0,
+      "corrective_action_recall": 1.0,
+      "variant_acceptance_rate": 1.0,
+      "premature_prompt_rate": 0.0,
+      "abstention_rate": 0.1111111111111111,
+      "double_annotated_session_fraction": 1.0,
+      "reference_token_coverage": 0.0,
+      "corrective_action_traceability": 1.0,
+      "latency": {
+        "first_partial_ms": {
+          "count": 9,
+          "p50_ms": 170.0,
+          "p95_ms": 196.0
+        },
+        "stable_result_ms": {
+          "count": 8,
+          "p50_ms": 450.0,
+          "p95_ms": 542.5
+        },
+        "final_result_ms": {
+          "count": 8,
+          "p50_ms": 580.0,
+          "p95_ms": 682.5
+        },
+        "decision_ms": {
+          "count": 9,
+          "p50_ms": 610.0,
+          "p95_ms": 744.0
+        },
+        "prompt_ms": {
+          "count": 3,
+          "p50_ms": 710.0,
+          "p95_ms": 755.0
+        },
+        "model_ms": {
+          "count": 1,
+          "p50_ms": 3810.0,
+          "p95_ms": 3810.0
+        }
+      }
+    },
+    "by_cohort": {
+      "selected_regional": {
+        "counts": {
+          "sessions": 1,
+          "speakers": 1,
+          "events": 5,
+          "safe_events": 2,
+          "false_corrections": 0,
+          "corrective_events": 1,
+          "gold_intervention_events": 1,
+          "valid_accent_variants": 1,
+          "abstentions": 1,
+          "non_correct_events": 3,
+          "double_annotated_sessions": 1,
+          "complete_reference_sessions": 0,
+          "traceable_corrective_events": 1
+        },
+        "wer": {
+          "reference_words": 8,
+          "substitutions": 2,
+          "deletions": 0,
+          "insertions": 0,
+          "rate": 0.25
+        },
+        "fcr": {
+          "rate": 0.0,
+          "lower_95": 0.0,
+          "upper_95": 0.6576280471103807
+        },
+        "false_action_share": 0.0,
+        "safe_stay_silent_rate": 1.0,
+        "corrective_action_precision": 1.0,
+        "corrective_action_recall": 1.0,
+        "variant_acceptance_rate": 1.0,
+        "premature_prompt_rate": 0.0,
+        "abstention_rate": 0.2,
+        "double_annotated_session_fraction": 1.0,
+        "reference_token_coverage": 0.0,
+        "corrective_action_traceability": 1.0,
+        "latency": {
+          "first_partial_ms": {
+            "count": 5,
+            "p50_ms": 170.0,
+            "p95_ms": 198.0
+          },
+          "stable_result_ms": {
+            "count": 4,
+            "p50_ms": 495.0,
+            "p95_ms": 552.5
+          },
+          "final_result_ms": {
+            "count": 4,
+            "p50_ms": 630.0,
+            "p95_ms": 692.5
+          },
+          "decision_ms": {
+            "count": 5,
+            "p50_ms": 670.0,
+            "p95_ms": 752.0
+          },
+          "prompt_ms": {
+            "count": 1,
+            "p50_ms": 760.0,
+            "p95_ms": 760.0
+          },
+          "model_ms": {
+            "count": 0,
+            "p50_ms": null,
+            "p95_ms": null
+          }
+        }
+      },
+      "comparison": {
+        "counts": {
+          "sessions": 1,
+          "speakers": 1,
+          "events": 4,
+          "safe_events": 2,
+          "false_corrections": 0,
+          "corrective_events": 2,
+          "gold_intervention_events": 2,
+          "valid_accent_variants": 0,
+          "abstentions": 0,
+          "non_correct_events": 2,
+          "double_annotated_sessions": 1,
+          "complete_reference_sessions": 0,
+          "traceable_corrective_events": 2
+        },
+        "wer": {
+          "reference_words": 8,
+          "substitutions": 1,
+          "deletions": 0,
+          "insertions": 0,
+          "rate": 0.125
+        },
+        "fcr": {
+          "rate": 0.0,
+          "lower_95": 0.0,
+          "upper_95": 0.6576280471103807
+        },
+        "false_action_share": 0.0,
+        "safe_stay_silent_rate": 1.0,
+        "corrective_action_precision": 1.0,
+        "corrective_action_recall": 1.0,
+        "variant_acceptance_rate": null,
+        "premature_prompt_rate": null,
+        "abstention_rate": 0.0,
+        "double_annotated_session_fraction": 1.0,
+        "reference_token_coverage": 0.0,
+        "corrective_action_traceability": 1.0,
+        "latency": {
+          "first_partial_ms": {
+            "count": 4,
+            "p50_ms": 167.5,
+            "p95_ms": 180.0
+          },
+          "stable_result_ms": {
+            "count": 4,
+            "p50_ms": 422.5,
+            "p95_ms": 463.25
+          },
+          "final_result_ms": {
+            "count": 4,
+            "p50_ms": 545.0,
+            "p95_ms": 592.5
+          },
+          "decision_ms": {
+            "count": 4,
+            "p50_ms": 590.0,
+            "p95_ms": 695.0
+          },
+          "prompt_ms": {
+            "count": 2,
+            "p50_ms": 660.0,
+            "p95_ms": 705.0
+          },
+          "model_ms": {
+            "count": 1,
+            "p50_ms": 3810.0,
+            "p95_ms": 3810.0
+          }
+        }
+      }
+    },
+    "accent_fcr_gap": 0.0,
+    "evidence": {
+      "all_split_speakers": 2,
+      "all_split_speakers_by_cohort": {
+        "selected_regional": 1,
+        "comparison": 1
+      },
+      "development_speakers_by_cohort": {
+        "selected_regional": 0,
+        "comparison": 0
+      },
+      "holdout_speakers_by_cohort": {
+        "selected_regional": 1,
+        "comparison": 1
+      },
+      "holdout_non_correct_events": 5
+    }
+  },
+  "gates": {
+    "fcr_overall": {
+      "pass": true,
+      "value": 0.0,
+      "operator": "<=",
+      "threshold": 0.02,
+      "kind": "rate"
+    },
+    "safe_stay_silent": {
+      "pass": true,
+      "value": 1.0,
+      "operator": ">=",
+      "threshold": 0.98,
+      "kind": "rate"
+    },
+    "corrective_action_precision": {
+      "pass": true,
+      "value": 1.0,
+      "operator": ">=",
+      "threshold": 0.9,
+      "kind": "rate"
+    },
+    "variant_acceptance": {
+      "pass": true,
+      "value": 1.0,
+      "operator": ">=",
+      "threshold": 0.95,
+      "kind": "rate"
+    },
+    "premature_prompt": {
+      "pass": true,
+      "value": 0.0,
+      "operator": "<=",
+      "threshold": 0.05,
+      "kind": "rate"
+    },
+    "accent_fcr_gap": {
+      "pass": true,
+      "value": 0.0,
+      "operator": "<=",
+      "threshold": 0.01,
+      "kind": "rate"
+    },
+    "stable_result_latency_p95_ms": {
+      "pass": true,
+      "value": 542.5,
+      "operator": "<=",
+      "threshold": 1200,
+      "kind": "ms"
+    },
+    "decision_latency_p95_ms": {
+      "pass": true,
+      "value": 744.0,
+      "operator": "<=",
+      "threshold": 1500,
+      "kind": "ms"
+    },
+    "fcr_selected_regional": {
+      "pass": true,
+      "value": 0.0,
+      "operator": "<=",
+      "threshold": 0.03,
+      "kind": "rate"
+    },
+    "fcr_comparison": {
+      "pass": true,
+      "value": 0.0,
+      "operator": "<=",
+      "threshold": 0.03,
+      "kind": "rate"
+    },
+    "all_split_speakers": {
+      "pass": false,
+      "value": 2,
+      "operator": ">=",
+      "threshold": 24,
+      "kind": "count"
+    },
+    "all_split_speakers_selected_regional": {
+      "pass": false,
+      "value": 1,
+      "operator": ">=",
+      "threshold": 12,
+      "kind": "count"
+    },
+    "development_speakers_selected_regional": {
+      "pass": false,
+      "value": 0,
+      "operator": ">=",
+      "threshold": 6,
+      "kind": "count"
+    },
+    "holdout_speakers_selected_regional": {
+      "pass": false,
+      "value": 1,
+      "operator": ">=",
+      "threshold": 6,
+      "kind": "count"
+    },
+    "all_split_speakers_comparison": {
+      "pass": false,
+      "value": 1,
+      "operator": ">=",
+      "threshold": 12,
+      "kind": "count"
+    },
+    "development_speakers_comparison": {
+      "pass": false,
+      "value": 0,
+      "operator": ">=",
+      "threshold": 6,
+      "kind": "count"
+    },
+    "holdout_speakers_comparison": {
+      "pass": false,
+      "value": 1,
+      "operator": ">=",
+      "threshold": 6,
+      "kind": "count"
+    },
+    "holdout_non_correct_events": {
+      "pass": false,
+      "value": 5,
+      "operator": ">=",
+      "threshold": 200,
+      "kind": "count"
+    },
+    "double_annotated_holdout_session_fraction": {
+      "pass": true,
+      "value": 1.0,
+      "operator": ">=",
+      "threshold": 0.2,
+      "kind": "rate"
+    },
+    "reference_token_coverage": {
+      "pass": false,
+      "value": 0.0,
+      "operator": ">=",
+      "threshold": 1.0,
+      "kind": "rate"
+    },
+    "corrective_action_traceability": {
+      "pass": true,
+      "value": 1.0,
+      "operator": ">=",
+      "threshold": 1.0,
+      "kind": "rate"
+    },
+    "not_evaluable_required_gates": {
+      "pass": true,
+      "value": 0,
+      "operator": "==",
+      "threshold": 0,
+      "kind": "count"
+    }
+  },
+  "policy_violations": []
+}

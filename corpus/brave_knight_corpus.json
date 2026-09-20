@@ -1,0 +1,314 @@
+{
+  "_README": [
+    "Corpus recipe for 'The Brave Knight' (22 files). Drives tools/make_corpus.py, which renders the WAVs and writes",
+    "a run_audio.py-ready manifest with the ground-truth labels already filled in.",
+    "",
+    "  python tools/make_corpus.py corpus/brave_knight_corpus.json --out corpus/brave_knight",
+    "  python tools/run_audio.py corpus/brave_knight/manifest.json --level 10 --tag synth-baseline",
+    "",
+    "WHAT THIS CORPUS IS FOR, AND WHAT IT IS NOT",
+    "  FOR: regression testing (did a change alter decisions?), policy/level sweeps, error-type coverage,",
+    "       and one genuine question - can the recogniser HEAR each accent feature at all?",
+    "  NOT FOR: any quoted accuracy or false-correction rate, and NOT for comparing Whisper model sizes.",
+    "       TTS audio is unnaturally clean, so every model scores well on it and a comparison would tell",
+    "       you distil-small is fine - the opposite of what real speech showed. Use real recordings for that.",
+    "",
+    "THE CIRCULARITY, STATED PLAINLY",
+    "  Files in the 'cork_feature' group are rendered FROM rules/ie_cork.yaml, and the decision layer",
+    "  generates its accepted variants from the same file. 'Does the system accept this?' is therefore a",
+    "  rule file agreeing with itself and proves nothing about whether the Cork model is right. What it does",
+    "  test honestly is the recogniser: if Whisper cannot hear [d̪ə] as anything the lexicon can match, that",
+    "  is a real finding. Read a pass as 'the feature is audible', never as 'the accent work is validated'.",
+    "",
+    "PASSAGE TOKENS (indices used by the labels below)",
+    "  0 The  1 brave  2 knight  3 went  4 out  5 into  6 the  7 cold  8 night  9 to  10 find  11 his  12 lost  13 horse",
+    "",
+    "WHY THESE ACCENTS",
+    "  ie_cork is the project's target variety, so it gets the most coverage. Exactly four accept-rules fire",
+    "  on this passage (dh-stopping on 'The'/'the', FACE monophthong on 'brave', GOAT monophthong on 'cold',",
+    "  t-glottalling on seven tokens) and one ambiguous rule (h-dropping on 'his'/'horse'). TH-fronting is",
+    "  NOT testable here - the passage contains no /θ/. us_general is included as a contrast and because it",
+    "  is the only profile with a rhotic-coda rule covering 'horse' - the same rhotic /r/ a Cork speaker",
+    "  produces. gb_rp is the near-standard control."
+  ],
+  "story": "brave_knight_v1",
+  "story_dir": "stories/brave_knight",
+  "text": "The brave knight went out into the cold night to find his lost horse",
+  "defaults": {
+    "engine": "piper",
+    "voice": "en_GB-southern_english_female-low",
+    "speaker": "synth",
+    "level": 10
+  },
+  "files": [
+    {
+      "_group": "control — clean standard read, four voices. The floor: if these fail, nothing else means anything.",
+      "id": "ctl_01_gb_south",
+      "kind": "clean",
+      "voice": "en_GB-southern_english_female-low",
+      "note": "control: standard, southern English female",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "ctl_02_gb_north",
+      "kind": "clean",
+      "voice": "en_GB-northern_english_male-medium",
+      "note": "control: standard, northern English male",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "ctl_03_scottish",
+      "kind": "clean",
+      "voice": "en_GB-alba-medium",
+      "note": "control: Scottish (rhotic base) — nearest shipped voice to Hiberno-English rhythm",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "ctl_04_us",
+      "kind": "clean",
+      "voice": "en_US-lessac-medium",
+      "note": "clear-speech control: British phonemes (əʊ, ɔː, non-rhotic) rendered through a US voice. NOT an American read - see us_04_all_accept for that.",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "_group": "ie_cork accept features, isolated one per file. Tests whether the recogniser can hear each.",
+      "id": "cork_01_dh_stopping",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "dh_stopping_dental"
+      ],
+      "note": "[ð]→[d̪] on tokens 0 and 6 — the classic Hiberno 'the'",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "cork_02_face_mono",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "face_monophthong"
+      ],
+      "note": "[eɪ]→[eː] on 'brave' (1)",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "cork_03_goat_mono",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "goat_monophthong"
+      ],
+      "note": "[əʊ]→[oː] on 'cold' (7)",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "cork_04_t_glottal",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "t_glottal"
+      ],
+      "note": "[t]->[ʔ] across seven tokens. NOT a Cork feature (Estuary/Scottish); rule is now `ambiguous`. The words WERE produced, so they are marked right: the correct outcome is ABSTAIN on those tokens, and any PROMPT on them is a false correction. Negative control.",
+      "wrong": [],
+      "unsure": [],
+      "expect_by_level": {
+        "10": "no intervention; 7 tokens abstain (LOW_CONFIDENCE_ABSTAIN)",
+        "50": "no intervention - a prompt here is a FALSE CORRECTION"
+      }
+    },
+    {
+      "id": "cork_05_all_accept",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "__all_accept__"
+      ],
+      "note": "every ie_cork accept rule together (dh-stopping, FACE, GOAT) — t_glottal is no longer among them. Closest this corpus gets to a Cork read.",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "_group": "ambiguous rules. The ONLY correct outcome is abstention: never an approval, never a correction.",
+      "id": "amb_01_h_dropping",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "h_dropping"
+      ],
+      "note": "[h]→∅ on 'his'(11) and 'horse'(13). Valid in some varieties AND a common error — undecidable from audio. Expect ABSTAIN.",
+      "wrong": [],
+      "unsure": [
+        11,
+        13
+      ]
+    },
+    {
+      "id": "amb_02_h_dropping_with_accepts",
+      "kind": "accent",
+      "profile": "ie_cork",
+      "rules": [
+        "__all_accept__",
+        "h_dropping"
+      ],
+      "note": "ambiguous feature alongside legitimate ones — the accepts must not drag the ambiguous one into approval",
+      "wrong": [],
+      "unsure": [
+        11,
+        13
+      ]
+    },
+    {
+      "_group": "us_general — a different legitimate variety, and the only profile with rhotic 'horse'.",
+      "id": "us_01_rhotic_horse",
+      "kind": "accent",
+      "profile": "us_general",
+      "rules": [
+        "rhotic_coda"
+      ],
+      "voice": "en_US-lessac-medium",
+      "note": "rhotic coda on 'horse'(13) — the same /r/ a Cork speaker produces. Key file for the video claim.",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "us_02_t_flap",
+      "kind": "accent",
+      "profile": "us_general",
+      "rules": [
+        "t_flap"
+      ],
+      "voice": "en_US-lessac-medium",
+      "note": "flapped [t] across seven tokens",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "us_03_lot_unrounded",
+      "kind": "accent",
+      "profile": "us_general",
+      "rules": [
+        "lot_unrounded"
+      ],
+      "voice": "en_US-lessac-medium",
+      "note": "[ɒ]→[ɑ] on 'lost'(12)",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "id": "us_04_all_accept",
+      "kind": "accent",
+      "profile": "us_general",
+      "rules": [
+        "__all_accept__"
+      ],
+      "voice": "en_US-lessac-medium",
+      "note": "all US accept rules together",
+      "wrong": [],
+      "unsure": []
+    },
+    {
+      "_note_gb_rp_omitted": "gb_rp's only rule firing on this passage is t_glottal, which renders phonemes IDENTICAL to cork_04. Two files, one audio - so gb_rp is omitted and cork_04 covers it. That t-glottalling is shared between RP and Cork is itself the point: the same feature is legitimate in both.",
+      "_skip": true
+    },
+    {
+      "_group": "deliberate errors. These are the files that make false-correction rate meaningful: the system SHOULD act here.",
+      "id": "err_01_substitution",
+      "kind": "error",
+      "error": "substitute",
+      "token": 7,
+      "with": "gold",
+      "note": "'cold'→'gold': single-phoneme substitution, the commonest real decoding error",
+      "wrong": [
+        7
+      ],
+      "unsure": []
+    },
+    {
+      "id": "err_02_substitution_horse",
+      "kind": "error",
+      "error": "substitute",
+      "token": 13,
+      "with": "house",
+      "note": "'horse'→'house': the confusion the challenge statement names explicitly",
+      "wrong": [
+        13
+      ],
+      "unsure": []
+    },
+    {
+      "id": "err_03_omission",
+      "kind": "error",
+      "error": "omit",
+      "token": 1,
+      "note": "'brave' omitted entirely — tests omission detection and cursor recovery",
+      "wrong": [
+        1
+      ],
+      "unsure": []
+    },
+    {
+      "id": "err_04_hesitation",
+      "kind": "error",
+      "error": "hesitate",
+      "token": 10,
+      "pause_ms": 2500,
+      "note": "2.5 s silence before 'find' — should PROMPT at level 10, not be scored as an error",
+      "wrong": [],
+      "unsure": [],
+      "expect_by_level": {
+        "10": "no intervention",
+        "50": "PROMPT on token 10 = a FALSE CORRECTION"
+      }
+    },
+    {
+      "id": "err_05_self_correction",
+      "kind": "error",
+      "error": "self_correct",
+      "token": 13,
+      "with": "house",
+      "note": "'house' then 'horse' — a self-correction in flight, and deliberately the same error as err_02 left uncorrected. Must score as a STRENGTH, never an error, and must not be interrupted. ('night'/'knight' would have been inaudible: identical phonemes.)",
+      "wrong": [],
+      "unsure": [],
+      "expect_by_level": {
+        "10": "no intervention; self_corrections == 1",
+        "50": "no intervention; self_corrections == 1"
+      }
+    },
+    {
+      "_group": "Tier B additions: the two error types the taxonomy has that the corpus lacked.",
+      "id": "err_06_repetition",
+      "kind": "error",
+      "error": "repeat",
+      "token": 7,
+      "times": 2,
+      "note": "'the cold cold night' - a mid-passage repetition (moved off the final token, where the cursor is already at the end and the logic is never exercised). Must be logged as repetition, scored neither as an error nor as a self-correction (contrast err_05). No intervention.",
+      "wrong": [],
+      "unsure": [],
+      "expect_by_level": {
+        "10": "no intervention; repetition logged, self_corrections == 0",
+        "50": "no intervention"
+      }
+    },
+    {
+      "id": "err_07_insertion",
+      "kind": "error",
+      "error": "insert",
+      "token": 7,
+      "with": "very",
+      "note": "'the very cold night' - an inserted word. Logged as an insertion; the passage tokens themselves are all read correctly, so none is marked wrong.",
+      "wrong": [],
+      "unsure": [],
+      "expect_by_level": {
+        "10": "no intervention on passage tokens; one insertion event",
+        "50": "at most a hold; no false correction"
+      }
+    }
+  ]
+}

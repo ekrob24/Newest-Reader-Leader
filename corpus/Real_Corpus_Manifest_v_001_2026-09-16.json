@@ -1,0 +1,6 @@
+[
+ {"wav":"BraveNight1.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[],"unsure":[],"note":"real voice, correct read 1"},
+ {"wav":"BraveNight2.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[],"unsure":[],"note":"real voice, correct read 2"},
+ {"wav":"BraveLight1.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[2],"unsure":[],"note":"real voice, knight->light, read 1"},
+ {"wav":"BraveLight2.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[2],"unsure":[],"note":"real voice, knight->light, read 2"}
+]

@@ -29,6 +29,15 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * The application's own test roots, named rather than discovered.
+ *
+ * `asr-benchmark/` is deliberately absent. It is an evaluation framework that runs beside the
+ * product, not inside it: its tests are Python, nothing here imports it, and this scan neither
+ * walks it nor is meant to. Were the roots ever replaced by a walk of the repository, this
+ * check would start reading Python and either find nothing and pass or throw - and it is a
+ * guard against assertions that cannot fail, so it must not become one.
+ */
 const ROOTS = ["server", "shared", "client", "e2e"];
 const TEST_FILE = /\.(test|spec)\.(ts|tsx|mts)$/;
 

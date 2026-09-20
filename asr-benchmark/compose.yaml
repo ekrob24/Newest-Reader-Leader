@@ -1,0 +1,12 @@
+services:
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: readerleader-asr-evaluation:1.1
+    working_dir: /app
+    volumes:
+      - ./input:/workspace/input
+      - ./output-local:/workspace/output
+    init: true
+    # The service is invoked with `docker compose run --rm benchmark ...`.

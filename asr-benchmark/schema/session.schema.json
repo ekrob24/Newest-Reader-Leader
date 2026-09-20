@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://readerleader.example/schema/asr-session-v1.json",
+  "title": "Reader-Leader ASR Benchmark Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "session_id", "speaker_id", "split", "cohort",
+    "age_band", "consent_verified", "assent_verified", "accent_label_source",
+    "passage_id", "reference_text", "asr_free_transcript", "asr_provider",
+    "asr_model", "audio", "capture", "session_started_at", "config_version"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "session_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{3,80}$"},
+    "speaker_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{3,80}$", "description": "Pseudonymous or hashed ID; never a child name."},
+    "split": {"type": "string", "enum": ["development", "holdout"]},
+    "cohort": {"type": "string", "enum": ["selected_regional", "comparison"]},
+    "age_band": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_years", "max_years"],
+      "properties": {
+        "min_years": {"type": "integer", "minimum": 4, "maximum": 17},
+        "max_years": {"type": "integer", "minimum": 4, "maximum": 17}
+      }
+    },
+    "consent_verified": {"type": "boolean"},
+    "assent_verified": {"type": "boolean"},
+    "accent_label_source": {"type": "string", "enum": ["guardian_report", "participant_report", "researcher_verified_metadata"]},
+    "passage_id": {"type": "string", "minLength": 1, "maxLength": 100},
+    "reference_text": {"type": "string", "minLength": 1},
+    "asr_free_transcript": {"type": "string"},
+    "asr_provider": {"type": "string", "minLength": 1, "maxLength": 100},
+    "asr_model": {"type": "string", "minLength": 1, "maxLength": 120},
+    "asr_mode": {"type": "string", "enum": ["free", "light_vocabulary_adaptation", "reference_conditioned"]},
+    "audio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sample_rate_hz", "channels", "duration_ms", "device_class", "environment"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1, "description": "Secure relative URI or controlled object-store URI; no public URL required."},
+        "sha256": {"type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$"},
+        "sample_rate_hz": {"type": "integer", "minimum": 16000},
+        "channels": {"const": 1},
+        "duration_ms": {"type": "integer", "minimum": 1},
+        "device_class": {"type": "string", "enum": ["laptop_builtin", "tablet_builtin", "headset", "external_microphone", "other"]},
+        "environment": {"type": "string", "enum": ["quiet_room", "classroom", "home", "lab", "other"]}
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["microphone_check_passed", "clipping_detected", "overlapping_speech_detected"],
+      "properties": {
+        "microphone_check_passed": {"type": "boolean"},
+        "clipping_detected": {"type": "boolean"},
+        "overlapping_speech_detected": {"type": "boolean"},
+        "estimated_snr_db": {"type": ["number", "null"]}
+      }
+    },
+    "session_started_at": {"type": "string", "format": "date-time"},
+    "config_version": {"type": "string", "minLength": 1, "maxLength": 80},
+    "notes": {"type": "string", "maxLength": 1000}
+  }
+}

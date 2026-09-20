@@ -1,0 +1,10 @@
+event_id,session_id,speaker_id,cohort,gold_event,gold_should_intervene,action,prompt_count,model_count,reason_code,false_correction,decision_ms
+evt_reg_house,sess_reg_001,spk_reg_001,selected_regional,valid_accent_variant,False,STAY_SILENT,0,0,APPROVED_ACCENT_VARIANT,False,670
+evt_reg_stone,sess_reg_001,spk_reg_001,selected_regional,substitution,True,PROMPT,1,0,CONFIRMED_NON_VARIANT_MISMATCH,False,760
+evt_reg_old,sess_reg_001,spk_reg_001,selected_regional,self_correction,False,STAY_SILENT,0,0,SELF_CORRECTION_COMPLETED,False,720
+evt_reg_fox,sess_reg_001,spk_reg_001,selected_regional,correct,False,STAY_SILENT,0,0,MATCH,False,575
+evt_reg_noise,sess_reg_001,spk_reg_001,selected_regional,unintelligible_noise,False,STAY_SILENT,0,0,UNSTABLE_PARTIAL,False,180
+evt_cmp_ran,sess_cmp_001,spk_cmp_001,comparison,substitution,True,MODEL,1,1,RETRY_FAILED_MODEL_WORD,False,710
+evt_cmp_house,sess_cmp_001,spk_cmp_001,comparison,correct,False,STAY_SILENT,0,0,MATCH,False,570
+evt_cmp_fox,sess_cmp_001,spk_cmp_001,comparison,correct,False,STAY_SILENT,0,0,MATCH,False,558
+evt_cmp_gate_stall,sess_cmp_001,spk_cmp_001,comparison,hesitation,True,PROMPT,1,0,CONFIRMED_STALL,False,610

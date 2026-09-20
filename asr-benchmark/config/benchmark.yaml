@@ -1,0 +1,57 @@
+benchmark_version: rl-stage4-benchmark-v1.1
+schema_version: 1.0.0
+evaluation_split: holdout
+
+normalization:
+  lowercase: true
+  strip_punctuation: true
+  preserve_apostrophes: true
+
+# Calibration defaults: tune on development speakers only, then freeze.
+state_machine:
+  partial_stability_ms: 400
+  self_correction_hold_ms: 2000
+  stall_prompt_ms: 3000
+  retry_model_ms: 3000
+  min_action_confidence: 0.80
+
+# Performance and safety gates for the frozen holdout split.
+prototype_gates:
+  fcr_overall_max: 0.02
+  fcr_per_cohort_max: 0.03
+  stay_silent_safe_min: 0.98
+  corrective_action_precision_min: 0.90
+  variant_acceptance_min: 0.95
+  premature_prompt_max: 0.05
+  accent_fcr_gap_max: 0.01
+  stable_result_latency_p95_ms_max: 1200
+  decision_latency_p95_ms_max: 1500
+
+# Evidence sufficiency prevents tiny or incomplete datasets from passing.
+# The 24-child / 12-per-cohort and 200-event thresholds are prototype-level,
+# not production or learning-science guarantees.
+evidence_gates:
+  min_total_speakers_all_splits: 24
+  min_speakers_per_cohort_all_splits: 12
+  min_development_speakers_per_cohort: 6
+  min_holdout_speakers_per_cohort: 6
+  min_holdout_non_correct_events: 200
+  min_double_annotated_holdout_session_fraction: 0.20
+  reference_token_coverage_min: 1.00
+  corrective_action_traceability_min: 1.00
+  require_all_gates_evaluable: true
+
+policy:
+  safe_gold_events:
+    - correct
+    - valid_accent_variant
+  corrective_actions:
+    - PROMPT
+    - MODEL
+  uncertainty_reason_codes:
+    - AUDIO_UNCERTAIN
+    - UNSTABLE_PARTIAL
+    - LOW_CONFIDENCE_ABSTAIN
+    - INSUFFICIENT_EVIDENCE
+    - POST_PROMPT_UNCERTAIN
+    - HOLD_EXPIRED_UNCERTAIN

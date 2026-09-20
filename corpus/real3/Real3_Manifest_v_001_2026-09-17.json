@@ -1,0 +1,5 @@
+[
+ {"wav":"bravenight3.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[],"unsure":[],"note":"correct read, slow pace, 20.2s"},
+ {"wav":"bravenight4.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[],"unsure":[],"note":"correct read, 8.0s"},
+ {"wav":"bravelight2.wav","story":"brave_knight_v1","speaker":"adult-01","wrong":[2],"unsure":[],"note":"knight->light at token 2, 6.6s"}
+]

@@ -1,0 +1,3 @@
+speaker_id,cohort,sessions,events,wer,fcr,safe_stay_silent_rate,corrective_action_precision,variant_acceptance_rate,decision_p95_ms
+spk_cmp_001,comparison,1,4,0.125,0.0,1.0,1.0,,695.0
+spk_reg_001,selected_regional,1,5,0.25,0.0,1.0,1.0,1.0,752.0

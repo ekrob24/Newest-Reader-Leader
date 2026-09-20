@@ -46,6 +46,9 @@ def scores_where(default, overrides):
     return [overrides.get(i, default) for i in range(len(WORDS))]
 
 
+import contextlib
+import io
+
 failures = []
 
 
@@ -97,8 +100,10 @@ check("the gap is worst-correct minus best-error", abs(clean["gap"] - 0.70) < 1e
       f"got {clean['gap']}")
 check("the highest error is the substitution, not the omission",
       clean["best_error"]["word"] == "hedgehog")
+check("the self-correction is reported at all", len(clean["self_corrections"]) == 1,
+      f"got {len(clean['self_corrections'])}")
 check("a self-correction scoring high is not flagged",
-      clean["self_corrections"][0]["flagged"] is False)
+      all(r["flagged"] is False for r in clean["self_corrections"]) and clean["self_corrections"] != [])
 
 print("\nbuild_verdict - the separations that must NOT be claimed")
 overlap = probe.build_verdict(probe.score_rows(
@@ -124,7 +129,7 @@ check("and the omission is named as the highest error",
 flagged = probe.build_verdict(probe.score_rows(
     WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.15})), ratio=0.02))
 check("a self-correction scoring low IS flagged as a false correction",
-      flagged["self_corrections"][0]["flagged"] is True)
+      [r["flagged"] for r in flagged["self_corrections"]] == [True])
 check("a self-correction never counts as one of the errors",
       all(r["deliberate"] != "self_correction" for r in flagged["errors"]))
 check("nor as one of the correctly-read words",
@@ -132,6 +137,46 @@ check("nor as one of the correctly-read words",
 check("nor do the words flanking the insertion",
       all(r["index"] not in (20, 21) for r in flagged["errors"])
       and flagged["worst_correct"]["index"] not in (20, 21))
+
+print("\na recording with no self-correction in it (--no-self-correction)")
+absent = probe.score_rows(
+    WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.88})), ratio=0.02,
+    self_corrected=False)
+check("word 35 stops being labelled a deliberate event", absent[35]["deliberate"] is None)
+check("and is marked as planned but not read", absent[35]["planned_but_not_performed"] is True)
+check("no other row is marked that way",
+      [r["index"] for r in absent if r["planned_but_not_performed"]] == [35])
+check("the default is still that it was performed",
+      probe.score_rows(WORDS, spans_for(scores_where(0.9, {})), 0.02)[35]["deliberate"] == "self_correction")
+
+absent_verdict = probe.build_verdict(absent)
+check("nothing is reported as a self-correction", absent_verdict["self_corrections"] == [])
+check("it now counts as one of the correctly-read words",
+      any(r["index"] == 35 for r in absent_verdict["errors"]) is False
+      and 35 in [r["index"] for r in absent if r["deliberate"] is None])
+
+# The point of moving it: as an ordinary correct word it can now drag the threshold down, and
+# must be able to. Held out of both pools it could never be caught doing so.
+dragging = probe.build_verdict(probe.score_rows(
+    WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.15})), ratio=0.02,
+    self_corrected=False))
+check("a low score on it can now produce NO GAP", dragging["clean_gap"] is False,
+      f"gap {dragging['gap']}, worst correct '{dragging['worst_correct']['word']}'")
+check("and it is named as the offending word", dragging["worst_correct"]["index"] == 35)
+# Held out of both pools - the old behaviour - the same audio would have claimed a clean gap.
+held_out = probe.build_verdict(probe.score_rows(
+    WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.15})), ratio=0.02,
+    self_corrected=True))
+check("which labelling it as a self-correction would have hidden", held_out["clean_gap"] is True)
+
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    probe.print_report(absent, absent_verdict)
+text = buffer.getvalue()
+check("the table marks the word that was planned and not read",
+      "self-correction was planned here and not read" in text)
+check("section 2 says it was not read rather than passing it", "Not read." in text)
+check("and says the question is still open", "still open" in text)
 
 print("\nbuild_verdict - the insertion")
 # "tall" ends at frame 126 -> 2.52s; give "gate" a 0.4s gap before it starts.
@@ -150,8 +195,6 @@ check("an absorbed insertion leaves no gap to see",
 
 print("\nprint_report")
 try:
-    import io
-    import contextlib
     for name, v in (("clean", clean), ("no gap", overlap), ("forced omission", forced)):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):

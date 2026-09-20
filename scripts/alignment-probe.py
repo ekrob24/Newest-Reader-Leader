@@ -11,6 +11,10 @@ turn: how well does this audio match THIS word? Closed vocabulary, one target, o
     pip install torch torchaudio numpy sounddevice soundfile
     python scripts/alignment-probe.py            # records, then aligns
     python scripts/alignment-probe.py --skip-record   # re-align the same wav
+    python scripts/alignment-probe.py --skip-record --no-self-correction
+
+The last form is for a recording where the reader read "watched" straight through instead of
+saying "washed" first. Word 35 is then an ordinary correctly-read word and is scored as one.
 
 The aligner weights come down from download.pytorch.org on first run, about 1.2GB, once.
 
@@ -70,12 +74,21 @@ def normalised_words(text):
     return re.findall(r"[A-Za-z']+", text)
 
 
-def score_rows(words, spans, ratio):
+SELF_CORRECTION_INDEX = 35
+
+
+def score_rows(words, spans, ratio, self_corrected=True):
     """One row per expected word: the duration-weighted mean of its token alignment scores.
 
     Weighted by token duration rather than a plain mean so that a long stressed vowel counts
     for more than the consonant beside it, and so a one-token word is comparable with a
     five-token one.
+
+    `self_corrected=False` says the reader read "watched" straight through instead of saying
+    "washed" first. The word is then an ordinary correctly-read word and must be scored as one:
+    leaving it labelled would hold it out of the correctly-read pool and out of the errors, so
+    it could neither drag the threshold down nor be caught doing so. The table still marks it,
+    because a planned event that did not happen is worth seeing.
     """
     rows = []
     for index, (word, word_spans) in enumerate(zip(words, spans)):
@@ -85,6 +98,9 @@ def score_rows(words, spans, ratio):
         # division guard - if it ever happens the row will sit at the bottom of the table.
         score = sum(s.score * (s.end - s.start) for s in word_spans) / total if total else 0.0
         kind = DELIBERATE.get(index, (None, None))[0]
+        skipped = index == SELF_CORRECTION_INDEX and not self_corrected
+        if skipped:
+            kind = None
         if kind is None and index in INSERTION_SITE:
             kind = "insertion_site"
         rows.append({
@@ -94,6 +110,7 @@ def score_rows(words, spans, ratio):
             "start": round(word_spans[0].start * ratio, 2),
             "end": round(word_spans[-1].end * ratio, 2),
             "deliberate": kind,
+            "planned_but_not_performed": skipped,
             "previously_false": index in PREVIOUSLY_FALSE,
         })
     return rows
@@ -109,6 +126,8 @@ def build_verdict(rows):
     best_error = max(errors, key=lambda r: r["score"])
     gap = worst_correct["score"] - best_error["score"]
 
+    # Empty when the reader did not perform one. Section 2 then reports that, rather than
+    # reporting a pass on a test that was never run.
     self_corrections = []
     for row in rows:
         if row["deliberate"] in NOT_AN_ERROR:
@@ -143,7 +162,9 @@ def print_report(rows, verdict):
     print(f"{'#':>3}  {'word':<12}{'score':>8}  {'time':<14}note")
     print("-" * 78)
     for row in rows:
-        if row["deliberate"] == "insertion_site":
+        if row["planned_but_not_performed"]:
+            note = "(self-correction was planned here and not read)"
+        elif row["deliberate"] == "insertion_site":
             note = f"<<< beside the inserted '{INSERTION_WORD}'"
         elif row["deliberate"] in NOT_AN_ERROR:
             note = f"<<< DELIBERATE {row['deliberate'].upper()} (must NOT be flagged)"
@@ -174,6 +195,13 @@ def print_report(rows, verdict):
     print("\n" + "=" * 78)
     print("2. THE SELF-CORRECTION - it must NOT be flagged")
     print("=" * 78)
+    if not verdict["self_corrections"]:
+        skipped = next((r for r in rows if r["planned_but_not_performed"]), None)
+        print("  Not read. The reader said '{}' straight through rather than correcting herself"
+              .format(skipped["word"] if skipped else "watched"))
+        print("  into it, so there is no self-correction in this audio to judge. It is scored")
+        print("  above as an ordinary correctly-read word, which is what it was.")
+        print("  This question is still open: it needs a recording that contains one.")
     for r in verdict["self_corrections"]:
         if not verdict["clean_gap"]:
             print(f"  '{r['word']}' {r['score']:.4f} - no threshold exists, so nothing to judge it against.")
@@ -238,6 +266,9 @@ def main():
     parser.add_argument("--seconds", type=int, default=45)
     parser.add_argument("--skip-record", action="store_true",
                         help="align an existing --audio file instead of recording a new one")
+    parser.add_argument("--no-self-correction", action="store_true",
+                        help="the recording does not contain the self-correction: word 35 was "
+                             "read straight through, so score it as an ordinary correct word")
     args = parser.parse_args()
 
     words = normalised_words(PASSAGE)
@@ -292,7 +323,10 @@ def main():
               "Every row below would be against the wrong word; stopping.")
         return 3
 
-    rows = score_rows(words, spans, ratio)
+    self_corrected = not args.no_self_correction
+    if not self_corrected:
+        print("\n--no-self-correction: word 35 is scored as an ordinary correctly-read word.")
+    rows = score_rows(words, spans, ratio, self_corrected)
     verdict = build_verdict(rows)
 
     print(f"\naligned {seconds_of_audio:.1f}s in {elapsed:.1f}s "
@@ -309,6 +343,7 @@ def main():
             "worst_correct": verdict["worst_correct"],
             "best_error": verdict["best_error"],
             "insertion_uncovered_seconds": verdict["insertion"]["uncovered_seconds"],
+            "self_correction_performed": self_corrected,
             "rows": rows,
         }, handle, indent=1)
     print("\nWritten to alignment-probe.json - send me that file.")

@@ -7,6 +7,103 @@ change one and change the other.**
 > Written during Task 4. Tasks 1–3 were not run in this session, so if they produce their own
 > runbook, reconcile the two rather than keeping both.
 
+## Start here: getting it running, step by step
+
+Written for someone tired, in a hotel, the night before. You do not need to know what any of
+these do. Do them in order.
+
+**On Windows** (open PowerShell):
+
+1. Install **Node 22** from nodejs.org, if it is not already there.
+2. Install **pnpm**: `npm install -g pnpm`
+3. Start a **MySQL 8**. With Docker Desktop running, this one line is enough:
+   `docker run -d --name rl-mysql -e MYSQL_ROOT_PASSWORD=rlroot -p 3306:3306 mysql:8.0`
+   Then **wait thirty seconds** before the next step.
+4. Get the code: `git clone <repo-url> reader-leader` then `cd reader-leader`
+5. Run the one command:
+   `powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1`
+6. Wait. It installs, creates and fills the database, builds, and starts the app. The first
+   run takes a few minutes. It is finished when you see **`Server running`**.
+7. Open **`http://localhost:3100`** in Chrome.
+   Use **localhost**, not `127.0.0.1` — browsers only allow the microphone on localhost or
+   HTTPS, and on `127.0.0.1` the microphone will simply never start.
+8. Sign in. The passwords are printed in the window just above `Server running`:
+   | | username | password |
+   | --- | --- | --- |
+   | Child | `child1` | `reader-child-2026` |
+   | Teacher | `teacher2` | `reader-teacher-2026` |
+   | Parent | `parent3` | `reader-parent-2026` |
+
+**On macOS or Linux**, steps 1–4 are the same, and step 5 is `./scripts/run-local.sh`.
+
+**To stop it:** press `Ctrl+C` in that window. **To start it again:** the same command. It will
+say `(already seeded — continuing)`, which is correct and not an error.
+
+### If something goes wrong
+
+- **`No MySQL is listening on 127.0.0.1:3306`** — step 3 did not finish. Give it thirty
+  seconds and run step 5 again.
+- **The login is rejected, and you set your own MySQL password** — re-run step 5 as
+  `powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1 -MysqlPassword "yourpassword"`
+- **`[OAuth] ERROR: OAUTH_SERVER_URL is not configured`** in the window — **ignore it.** It
+  appears on every start and the demo does not use OAuth. It is not your problem.
+- **Anything else** — the table below names the five environment variables and what each one
+  looks like when it is missing. `run-local.ps1` sets all five for you, so you should not need
+  it unless you are starting the app by hand.
+
+---
+
+## THE FALLBACK: the override, with no microphone and no network
+
+**Use this if the microphone fails, the venue wifi dies, or anything at all goes wrong with the
+live read.** It reaches the moment the product is actually about — a teacher overturning the
+software's judgement and the child's record following her — using reading data that was seeded
+before you arrived. It needs no voice, no microphone and no internet.
+
+Unplug the microphone and turn the wifi off if you like; it behaves identically. The app runs
+on your own machine and talks to a database on your own machine.
+
+From the app running at `http://localhost:3100`:
+
+1. **Continue as Teacher** → password `reader-teacher-2026` → **Open my reading space**.
+2. Scroll to **Saved reading sessions**.
+3. On the row **The Lantern in the Garden · last week**, click **Review word by word**.
+4. The running record opens. Note the figures at the top: **After your decisions 100%** and
+   **Reading speed, after your decisions 93 WCPM**. Nothing counts against this child yet,
+   because no human has confirmed anything. Two moments below say **Decision needed**.
+5. Under **Other flagged moments**, find the word **hedgehog**. Click **Confirm event**.
+   → The figures change in front of you: **98%** and **91 WCPM**. Confirming is what lets a
+   flag count.
+6. Click **Override** on the same moment.
+   → It returns to **100%** and **93 WCPM**. The teacher overruled the software and the child's
+   record followed the teacher. **This is the point of the whole product.**
+7. Under **Accent variations**, click **Confirm variation**.
+   → The figures do **not** move. An Irish-English variation is a correct reading in the
+   child's dialect and can never count as an error. The fairness claim, shown rather than
+   asserted.
+
+**What to say while doing it:** nothing counts against a child until a teacher confirms it, the
+teacher can always overrule the machine, and an accent variation is never a mistake.
+
+**Every screen on this path carries the synthetic-data statement** — "Demonstration build —
+everything here is synthetic" — at the top. It is rendered outside the router in `App.tsx`, so
+it is on every screen; it cannot be dismissed and does not depend on a variable anybody
+remembered to set. A seeded reading shown without it would be the product asserting something
+that did not happen.
+
+**Resetting it.** Teacher decisions persist. To run the sequence a second time, stop the app,
+drop the database and run `run-local.ps1` again — or just use a different saved session, of
+which there are several.
+
+### The recorded version
+
+`pnpm demo:record` produces `demo-recording/reader-leader-walkthrough.webm` — 46 seconds,
+1280x800, the whole journey including this override — plus one screenshot per step in
+`demo-recording/frames/`. **Have it on the laptop before you travel.** If the machine will not
+run, the video is the demo.
+
+---
+
 ## Before you start
 
 Five variables. Each one breaks the demo in a way that does not name itself, so the symptom is

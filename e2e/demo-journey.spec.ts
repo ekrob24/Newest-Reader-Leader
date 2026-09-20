@@ -220,3 +220,60 @@ test("the demo journey", async ({ page, context }) => {
   await expect(page.getByTestId("unrecorded-attempts")).toHaveCount(0);
   await expect(page.getByTestId("synthetic-data-notice")).toBeVisible();
 });
+
+/**
+ * The condition the fixtures never contained.
+ *
+ * The journey above emits a perfect transcript, which is why the whole suite stayed green
+ * while the live path collapsed on any dropped function word: the cursor pinned on the first
+ * mismatch and the passage stopped turning its pages. The prior art on this bug reports the
+ * same thing - a regression suite clean through 45 releases because its fixtures held none of
+ * the condition that breaks the code.
+ *
+ * So this one drops a word mid-passage, the way a recogniser does when connected speech
+ * reduces "into the" to a blur. Before bounded re-anchoring it would have hung at "Page 4 of
+ * 4" and never reached the report, because the pages only turn as words are matched.
+ */
+test("a dropped function word does not stop the reading", async ({ page, context }) => {
+  expect(CHILD_PASSWORD, "the demo passwords must be set").not.toBe("");
+
+  // "the" removed from the middle of the passage. Nothing else changes.
+  const withDroppedWord = SPOKEN.replace("into de garden", "into de");
+  expect(withDroppedWord, "the drop must actually remove a word").not.toBe(SPOKEN);
+
+  await context.addInitScript(spoken => {
+    class FakeSpeechRecognition {
+      onresult?: (event: unknown) => void;
+      start() {
+        setTimeout(() => {
+          const results = [[{ transcript: spoken }]] as unknown as { isFinal: boolean }[];
+          (results[0] as { isFinal: boolean }).isFinal = true;
+          this.onresult?.({ results, resultIndex: 0 });
+        }, 250);
+      }
+      stop() {}
+      abort() {}
+    }
+    Object.assign(window, { SpeechRecognition: FakeSpeechRecognition, webkitSpeechRecognition: FakeSpeechRecognition });
+  }, withDroppedWord);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Continue as Child/i }).click();
+  await page.locator("input[type=password]").fill(CHILD_PASSWORD);
+  await page.getByRole("button", { name: /Open my reading space/i }).click();
+  await expect(page.getByRole("button", { name: /Start today.s read/ })).toBeVisible();
+  await page.getByRole("button", { name: /Start today.s read/ }).click();
+  await page.getByRole("button", { name: /Start guided reading/ }).click();
+  await expect(page.getByRole("button", { name: /^Tap to Read$/ })).toBeVisible();
+  await page.getByRole("button", { name: /^Tap to Read$/ }).click();
+
+  // The assertion that matters. The pages turn as the matcher reaches words, so reaching the
+  // last page means the cursor followed the reader past the word that was never heard.
+  await expect(page.getByText(/Page 4 of 4/)).toBeVisible();
+
+  await page.waitForTimeout(2500);
+  await page.getByRole("button", { name: /Finish story/ }).click();
+  await expect(page.getByText(/brave read|finished your reading|try that one again/i).first()).toBeVisible();
+  const saveState = page.getByTestId("save-state");
+  await expect(saveState).toHaveAttribute("data-save-status", "saved", { timeout: 15_000 });
+});

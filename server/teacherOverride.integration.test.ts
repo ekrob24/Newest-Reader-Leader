@@ -35,7 +35,7 @@ async function fixture() {
   const session = await saveReadingSession(scope, {
     childProfileId: profile.id, storyTitle: "Override check", transcript: analysis.transcript,
     accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds,
-    practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates,
+    interventions, wordStates: analysis.wordStates,
   });
   return { scope, sessionId: session.id, storedAccuracy: session.accuracy };
 }

@@ -46,8 +46,7 @@ async function saveAnalysedSession() {
   const saved = await saveReadingSession(scope, {
     childProfileId, storyTitle: "Word rows", transcript: analysis.transcript,
     accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace,
-    durationSeconds: analysis.durationSeconds, practiceWords: analysis.practiceWords,
-    interventions, wordStates: analysis.wordStates,
+    durationSeconds: analysis.durationSeconds, interventions, wordStates: analysis.wordStates,
     wordTimings: analysis.wordStates.map((state, index) => ({ id: state.id, text: state.text, startMs: index * 500, endMs: index * 500 + 400 })),
   });
   return { db, scope, savedId: saved.id, interventions };

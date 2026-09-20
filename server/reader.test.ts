@@ -35,10 +35,10 @@ describe("Reader Leader prototype analysis", () => {
     expect(corrected.childMessage).toMatch(/another go/i);
   });
 
-  it("selects gentle practice words for an omission", () => {
+  it("records an omission gently without naming the word as a difficulty", () => {
     const result = analyseReadingText("The glimmered lantern shone", "The lantern shone", 20);
-    expect(result.practiceWords).toContain("glimmered");
     expect(result.events.some(event => event.eventType === "omission" && event.action === "practise_gently")).toBe(true);
+    expect(result.nextStep).not.toContain("glimmered");
   });
 
   it("keeps a child or parent scoped to linked profiles while teachers can view class progress", () => {
@@ -67,7 +67,6 @@ describe("Reader Leader prototype analysis", () => {
     const attempts = initialiseWordStates("The glimmered lantern");
     attempts[1] = { ...attempts[1], attempts: 3, status: "retried_correct" };
     const result = analyseReadingText("The glimmered lantern", "The lantern", 30, "MONTHLY_ASSESSMENT", attempts);
-    expect(result.practiceWords).toEqual([]);
     expect(result.retrySummary).toEqual([]);
     expect(result.selfCorrections).toEqual([]);
     expect(result.events.find(event => event.eventType === "omission")?.action).toBe("teacher_review");
@@ -84,7 +83,6 @@ describe("Reader Leader prototype analysis", () => {
   it("accepts reviewed Irish English transcript variants provisionally and keeps them in teacher review", () => {
     const result = analyseReadingText("The thin path was caught", "The tin pat was cot", 30, "ASSISTED_PRACTICE", undefined, "IRISH_ENGLISH_SUPPORT");
     expect(result.accuracy).toBe(100);
-    expect(result.practiceWords).toEqual([]);
     expect(result.events.filter(event => event.eventType === "dialect_variation")).toHaveLength(3);
     expect(result.events.filter(event => event.eventType === "dialect_variation").every(event => event.action === "teacher_review")).toBe(true);
   });

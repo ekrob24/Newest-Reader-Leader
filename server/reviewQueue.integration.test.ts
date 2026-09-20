@@ -32,7 +32,7 @@ async function fixture() {
   const session = await saveReadingSession(scope, {
     childProfileId: profile.id, storyTitle: "Queue check", transcript: analysis.transcript,
     accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds,
-    practiceWords: analysis.practiceWords, interventions: buildInterventions(analysis.events),
+    interventions: buildInterventions(analysis.events),
     wordStates: analysis.wordStates,
   });
   return { scope, sessionId: session.id, expectedWords: analysis.wordStates.length };

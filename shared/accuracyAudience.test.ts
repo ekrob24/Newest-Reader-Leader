@@ -14,7 +14,7 @@ const progress = {
     { id: "A", storyTitle: "One", accuracy: 91, wordsCorrectPerMinute: 102, settledWordsCorrectPerMinute: 97 },
     { id: "B", storyTitle: "Two", accuracy: 64, wordsCorrectPerMinute: 88, settledWordsCorrectPerMinute: null },
   ],
-  summary: { sessionsCompleted: 2, averageAccuracy: 78, averageWcpm: 95, practiceWords: ["lantern"] },
+  summary: { sessionsCompleted: 2, averageAccuracy: 78, averageWcpm: 95 },
 };
 
 const result = {
@@ -56,7 +56,7 @@ describe("removing the field rather than hiding it", () => {
   it("drops the average from a summary and leaves everything else alone", () => {
     const summary = withoutSummaryAccuracy(progress.summary);
     expect("averageAccuracy" in summary).toBe(false);
-    expect(summary).toEqual({ sessionsCompleted: 2, averageWcpm: 95, practiceWords: ["lantern"] });
+    expect(summary).toEqual({ sessionsCompleted: 2, averageWcpm: 95 });
   });
 
   it("does not mutate what it was given", () => {
@@ -94,7 +94,6 @@ describe("a child-progress payload", () => {
       expect(payload.profile).toEqual({ displayName: "Test Reader" });
       expect(payload.sessions.map(session => session.storyTitle)).toEqual(["One", "Two"]);
       expect(payload.summary.sessionsCompleted).toBe(2);
-      expect(payload.summary.practiceWords).toEqual(["lantern"]);
     });
   }
 });

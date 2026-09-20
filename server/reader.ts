@@ -11,7 +11,7 @@ export type ReadingAnalysis = {
   transcript: string; mode: AssessmentMode; accuracy: number; firstPassAccuracy: number; pace: number; firstPassWcpm: number;
   correctWords: number; firstPassCorrectWords: number; totalWords: number; durationSeconds: number;
   /** False when the read was too short for words-per-minute to carry meaning. */
-  paceReliable: boolean; practiceWords: string[];
+  paceReliable: boolean;
   events: ReadingEvent[]; wordStates: WordState[]; retrySummary: { word: string; retries: number }[]; selfCorrections: string[];
   modelWords: string[]; childMessage: string; nextStep: string;
 };
@@ -25,7 +25,6 @@ export const assessmentModes: Record<AssessmentMode, { label: string; shortLabel
 const wordPattern = /[a-zA-Z]+(?:'[a-zA-Z]+)?/g;
 export function tokenize(text: string): string[] { return (text.toLowerCase().match(wordPattern) ?? []).map(word => word.replace(/[^a-z']/g, "")); }
 export function initialiseWordStates(text: string): WordState[] { return tokenize(text).map((word, index) => ({ id: `word-${index}`, text: word, status: index === 0 ? "current" : "unread", attempts: 0 })); }
-function displayWord(word: string): string { return word.length ? word[0].toUpperCase() + word.slice(1) : "that word"; }
 function eventAction(mode: AssessmentMode, kind: ReadingEventKind): ReadingEvent["action"] {
   if (kind === "dialect_variation") return "teacher_review";
   if (mode === "MONTHLY_ASSESSMENT") return kind === "correct" ? "celebrate" : "teacher_review";
@@ -100,9 +99,23 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
   const resolvedStates = mergeAttemptHistory(states, attemptedStates, mode);
   const retrySummary = resolvedStates.filter(state => state.attempts > 1).map(state => ({ word: state.text, retries: state.attempts - 1 }));
   const selfCorrections = resolvedStates.filter(state => state.status === "retried_correct").map(state => state.text);
-  const notableEvents = events.filter(event => event.eventType === "substitution" || event.eventType === "omission");
-  const skippedPracticeWords = resolvedStates.filter(state => state.status === "incorrect" && state.attempts >= 3).map(state => state.text);
-  const practiceWords = mode === "MONTHLY_ASSESSMENT" ? [] : Array.from(new Set([...skippedPracticeWords, ...notableEvents.map(event => event.expectedWord)].filter(word => word.length > 3))).slice(0, 3);
+  // There is no "tricky words" list here any more, and nothing should reintroduce one.
+  //
+  // It was the first three words, over three letters, of the substitution and omission events -
+  // which is to say the first three words of wherever the comparison came apart, in passage
+  // order. Nothing about the words themselves was measured: not their length as a difficulty
+  // signal, not how long the child took, not how often she went back. Presented to a child,
+  // her parent and her teacher as "tricky words to practise", it asserted a difficulty the
+  // software had never observed.
+  //
+  // It was not a rare misfire. On a real read of "The Lantern in the Garden", the scored
+  // transcript ended at word 30 of 42, so the trailing loop marked the last twelve words
+  // omitted and the screen named "amina", "stood", "very" - the child's own name among them -
+  // as her difficulties, while the live highlight had them green. server/practiceWords.test.ts
+  // holds that case.
+  //
+  // The only list with a source is the words a teacher confirmed as miscues, which lives in
+  // the word resolutions, not here.
   const modelWords = mode === "GUIDED_PRACTICE" ? resolvedStates.filter(state => state.status === "incorrect" && state.attempts >= 2).map(state => state.text) : [];
   // Record the duration as it was read and guard only the division. The previous floor of
   // twenty seconds rewrote a short read into a longer one, so a three-second reading was
@@ -127,8 +140,8 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
     : selfCorrections.length
       ? "You noticed a tricky word and had another go. That is what thoughtful readers do."
       : "You read the whole story through. Your teacher will look at it with you.";
-  const nextStep = mode === "MONTHLY_ASSESSMENT" ? "No correction prompts were used during this first-pass reading check." : practiceWords[0] ? `Try “${displayWord(practiceWords[0])}” slowly once, then pop it back into the sentence.` : "Choose one sentence you enjoyed and read it again with a smooth, steady voice.";
-  return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: recordedDuration, paceReliable: isPaceMeaningful(recordedDuration), practiceWords, events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
+  const nextStep = mode === "MONTHLY_ASSESSMENT" ? "No correction prompts were used during this first-pass reading check." : "Choose one sentence you enjoyed and read it again with a smooth, steady voice.";
+  return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: recordedDuration, paceReliable: isPaceMeaningful(recordedDuration), events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
 }
 
 /** The saved-intervention shape, built from analyser events. Both save paths and the demo

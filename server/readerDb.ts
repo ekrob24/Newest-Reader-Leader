@@ -453,7 +453,6 @@ export async function saveReadingSession(scope: TenantScope, input: {
   audioStatus?: AudioRetentionStatus;
   assessmentMode?: AssessmentMode;
   languageSupport?: ReadingLanguageSupport;
-  practiceWords: string[];
   interventions: StoredIntervention[];
   wordStates?: StoredWordState[];
   wordTimings?: StoredWordTiming[];
@@ -470,7 +469,7 @@ export async function saveReadingSession(scope: TenantScope, input: {
   const capture = resolveCaptureTime(capturedAt, new Date());
   const wordStates = input.wordStates ?? [];
   const wordTimings = input.wordTimings ?? [];
-  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, audioStatus: input.audioStatus ?? (input.audioStorageKey ? "stored" : "not_captured"), assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", wordStates, wordTimings, completed: 1 });
+  await db.insert(readingSessions).values({ ...session, id, capturedAt: capture.capturedAt, capturedAtSource: capture.capturedAtSource, materialId: input.materialId ?? null, audioStorageKey: input.audioStorageKey ?? null, audioStatus: input.audioStatus ?? (input.audioStorageKey ? "stored" : "not_captured"), assessmentMode: input.assessmentMode ?? "ASSISTED_PRACTICE", languageSupport: input.languageSupport ?? "STANDARD_ENGLISH", practiceWords: [], wordStates, wordTimings, completed: 1 });
 
   // One row per word, from the same evidence as the JSON columns above. Additive: the JSON
   // stays the source of truth until everything downstream reads the table.
@@ -787,7 +786,6 @@ export async function getChildProgress(scope: TenantScope, childProfileId: numbe
   const sessions = await db.select().from(readingSessions).where(eq(readingSessions.childProfileId, childProfileId)).orderBy(desc(readingSessions.createdAt)).limit(36);
   const total = sessions.length || 1;
   const averageAccuracy = Math.round(sessions.reduce((sum, session) => sum + session.accuracy, 0) / total);
-  const practiceWords = Array.from(new Set(sessions.flatMap(session => session.practiceWords))).slice(0, 4);
   // Words correct per minute, from the words a teacher confirmed rather than the ones the
   // recogniser guessed. A reading still under review contributes nothing: averaging a
   // partly-reviewed figure in would put the same unfounded assertion back, one step removed.
@@ -816,7 +814,6 @@ export async function getChildProgress(scope: TenantScope, childProfileId: numbe
       averageWcpm,
       /** How many saved readings the averageWcpm above is actually made of. */
       readingsWithSettledPace: publishedPaces.length,
-      practiceWords,
     },
   };
 }
@@ -974,7 +971,8 @@ function demoReading(input: { expectedText: string; transcript: string; duration
     wordsCorrectPerMinute: analysis.pace,
     durationSeconds: analysis.durationSeconds,
     assessmentMode: analysis.mode,
-    practiceWords: analysis.practiceWords,
+    // Stored empty: the column outlives the fabricated list that used to fill it.
+    practiceWords: [] as string[],
     wordStates: analysis.wordStates,
     interventions: buildInterventions(analysis.events),
   };

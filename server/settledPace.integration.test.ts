@@ -37,7 +37,7 @@ async function fixture() {
   const session = await saveReadingSession(scope, {
     childProfileId: profile.id, storyTitle: "Pace check", transcript: analysis.transcript,
     accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds,
-    practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates,
+    interventions, wordStates: analysis.wordStates,
   });
   return { scope, profileId: profile.id, sessionId: session.id, flagged: interventions.length, machinePace: session.wordsCorrectPerMinute };
 }
@@ -115,7 +115,7 @@ describe.skipIf(!databaseAvailable)("the pace a parent sees follows the teacher,
     await saveReadingSession(scope, {
       childProfileId: profileId, storyTitle: "Second, unreviewed", transcript: analysis.transcript,
       accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: SECONDS,
-      practiceWords: analysis.practiceWords, interventions: buildInterventions(analysis.events),
+      interventions: buildInterventions(analysis.events),
       wordStates: analysis.wordStates,
     });
     for (let index = 0; index < flagged; index += 1) {

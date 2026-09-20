@@ -55,7 +55,7 @@ describe("what a child or a parent can be sent", () => {
     it(`the progress payload carries no machine accuracy or machine pace for a ${audience}`, () => {
       const payload = progressForAudience({
         sessions: [{ ...session, settledWordsCorrectPerMinute: 97 }],
-        summary: { sessionsCompleted: 1, averageAccuracy: 91, averageWcpm: 97, practiceWords: [] },
+        summary: { sessionsCompleted: 1, averageAccuracy: 91, averageWcpm: 97 },
       }, audience);
       const text = JSON.stringify(payload);
       expect(text).not.toMatch(MACHINE_FIGURE);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createReadingReport } from "./readerReports";
+import { ACCURACY_WITHHELD_NOTE } from "../shared/accuracyAudience";
 import { scoreQuiz } from "./quizPolicy";
 
 const sessions = [{ id: "01K5H2VQ0M0000000000000001", schoolId: 1, childProfileId: 5, materialId: null, storyTitle: "The Moonlight Kite", transcript: "Mina found a kite.", accuracy: 91, wordsCorrectPerMinute: 108, durationSeconds: 75, audioStorageKey: null, audioStatus: "not_captured" as const, completed: 1, practiceWords: ["glimmered"], interventions: [], assessmentMode: "ASSISTED_PRACTICE" as const, languageSupport: "STANDARD_ENGLISH" as const, wordStates: [], wordTimings: null, capturedAt: null, capturedAtSource: "server" as const, createdAt: new Date() }];
@@ -16,6 +17,27 @@ describe("role-specific reading reports", () => {
     const report = createReadingReport({ audience: "parent", childName: "Amina", bookBand: "Level 3", sessions });
     expect(report.filename).toBe("amina-parent-reading-summary.md");
     expect(report.content).toContain("Try this together");
+  });
+
+  it("shows a child no accuracy figure, and says why the gap is there", () => {
+    const report = createReadingReport({ audience: "child", childName: "Amina", bookBand: "Level 3", sessions });
+    expect(report.content).not.toContain("91%");
+    expect(report.content).not.toMatch(/story match/i);
+    expect(report.content).toContain(ACCURACY_WITHHELD_NOTE);
+  });
+
+  it("shows a parent no accuracy figure, and says why the gap is there", () => {
+    const report = createReadingReport({ audience: "parent", childName: "Amina", bookBand: "Level 3", sessions });
+    expect(report.content).not.toContain("91%");
+    expect(report.content).not.toMatch(/story match/i);
+    expect(report.content).toContain(ACCURACY_WITHHELD_NOTE);
+  });
+
+  it("still shows a teacher the figure she ranks her review queue by", () => {
+    const report = createReadingReport({ audience: "teacher", childName: "Amina", bookBand: "Level 3", sessions });
+    expect(report.content).toContain("91%");
+    expect(report.content).toMatch(/story match/i);
+    expect(report.content).not.toContain(ACCURACY_WITHHELD_NOTE);
   });
 
   it("creates a teacher running record with session evidence", () => {

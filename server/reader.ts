@@ -81,7 +81,17 @@ export function analyseReadingText(expectedText: string, transcript: string, dur
   const accuracy = mode === "MONTHLY_ASSESSMENT" ? firstPassAccuracy : assistedAccuracy;
   const firstPassWcpm = Math.max(0, Math.round((firstPassCorrectWords / effectiveDuration) * 60));
   const pace = mode === "MONTHLY_ASSESSMENT" ? firstPassWcpm : Math.max(0, Math.round((correctWords / effectiveDuration) * 60));
-  const childMessage = mode === "MONTHLY_ASSESSMENT" ? "You completed your monthly reading check with calm focus. Your teacher will review it with you." : selfCorrections.length ? "You noticed a tricky word and had another go. That is what thoughtful readers do." : accuracy >= 92 ? "Wonderful focus. You kept the story moving and made your voice clear." : "You stayed with a tricky text, and that is how strong readers grow.";
+  // The message a child reads must not be an accuracy band in prose. It used to split on
+  // accuracy >= 92 - "Wonderful focus" above the line, "You stayed with a tricky text" below -
+  // which handed the child the same unconfirmed judgement the percentage does, only harder to
+  // argue with, and told a reader the software had simply mis-heard that she had struggled.
+  // What is left is drawn from what the child actually did: she finished, or she went back and
+  // had another go at a word.
+  const childMessage = mode === "MONTHLY_ASSESSMENT"
+    ? "You completed your monthly reading check with calm focus. Your teacher will review it with you."
+    : selfCorrections.length
+      ? "You noticed a tricky word and had another go. That is what thoughtful readers do."
+      : "You read the whole story through. Your teacher will look at it with you.";
   const nextStep = mode === "MONTHLY_ASSESSMENT" ? "No correction prompts were used during this first-pass reading check." : practiceWords[0] ? `Try “${displayWord(practiceWords[0])}” slowly once, then pop it back into the sentence.` : "Choose one sentence you enjoyed and read it again with a smooth, steady voice.";
   return { transcript: transcript.trim(), mode, accuracy, firstPassAccuracy, pace, firstPassWcpm, correctWords, firstPassCorrectWords, totalWords: expected.length, durationSeconds: recordedDuration, paceReliable: isPaceMeaningful(recordedDuration), practiceWords, events, wordStates: resolvedStates, retrySummary, selfCorrections, modelWords, childMessage, nextStep };
 }

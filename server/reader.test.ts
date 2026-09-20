@@ -7,11 +7,32 @@ describe("Reader Leader prototype analysis", () => {
     expect(tokenize("A kite's tail—swirled!")).toEqual(["a", "kite's", "tail", "swirled"]);
   });
 
-  it("reports an exact read with a positive message", () => {
+  it("reports an exact read, and still computes the accuracy the teacher will rank by", () => {
     const result = analyseReadingText("The bright kite rose", "The bright kite rose", 30);
     expect(result.accuracy).toBe(100);
     expect(result.pace).toBe(8);
-    expect(result.childMessage).toContain("Wonderful");
+  });
+
+  it("says the same thing to a child who read it perfectly and a child who did not", () => {
+    // The message used to split on accuracy >= 92: "Wonderful focus" above the line, "You
+    // stayed with a tricky text" below. That handed the child the same unconfirmed judgement
+    // the percentage did, and told a reader the recogniser had mis-heard that she struggled.
+    const perfect = analyseReadingText("The bright kite rose over the tall grey wall", "The bright kite rose over the tall grey wall", 30);
+    const poor = analyseReadingText("The bright kite rose over the tall grey wall", "The kite", 30);
+    expect(perfect.accuracy).toBe(100);
+    expect(poor.accuracy).toBeLessThan(92);
+    expect(perfect.childMessage).toBe(poor.childMessage);
+    expect(perfect.childMessage).not.toMatch(/wonderful|tricky text/i);
+  });
+
+  it("does vary the message on something the child actually did", () => {
+    const text = "The bright kite rose over the tall grey wall";
+    // Two attempts on "kite": mergeAttemptHistory only believes an attempt history that shows
+    // more attempts than this pass through the transcript found.
+    const states = initialiseWordStates(text).map(state => (state.text === "kite" ? { ...state, status: "retried_correct" as const, attempts: 2 } : state));
+    const corrected = analyseReadingText(text, text, 30, "ASSISTED_PRACTICE", states);
+    expect(corrected.selfCorrections).toContain("kite");
+    expect(corrected.childMessage).toMatch(/another go/i);
   });
 
   it("selects gentle practice words for an omission", () => {

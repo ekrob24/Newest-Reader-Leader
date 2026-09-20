@@ -38,6 +38,7 @@ import {
 import { scopedDb, unscopedDb, type TenantScope } from "./tenantScope";
 import { storagePut } from "./storage";
 import { buildMonthlyAssessmentTrend, isValidTrendDateRange, minutesReadThisWeek, type TrendDateRange } from "./learningAnalytics";
+import { progressForAudience } from "../shared/accuracyAudience";
 import { createDemoPlaybackTone } from "./demoPlaybackFixture";
 import { isPracticeChecklistComplete, normalisePracticeSteps, practiceChecklistDate } from "./homePractice";
 import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "../shared/dialectSupport";
@@ -846,7 +847,9 @@ export async function getParentDashboard(scope: TenantScope, parentUserId: numbe
   const db = await scopedDb(scope);
   const children = await db.select({ childProfileId: childProfiles.id, displayName: childProfiles.displayName, bookBand: childProfiles.bookBand })
     .from(familyLinks).innerJoin(childProfiles, eq(familyLinks.childProfileId, childProfiles.id)).where(eq(familyLinks.parentUserId, parentUserId));
-  const progress = await Promise.all(children.map(async child => ({ ...child, ...(await getChildProgress(scope, child.childProfileId)), practiceChecklist: await getHomePracticeChecklist(scope, parentUserId, child.childProfileId) })));
+  // A parent dashboard has exactly one audience, so the accuracy figures come off here rather
+  // than at the procedure: there is no caller of this function for whom they should survive.
+  const progress = await Promise.all(children.map(async child => ({ ...child, ...progressForAudience(await getChildProgress(scope, child.childProfileId), "parent"), practiceChecklist: await getHomePracticeChecklist(scope, parentUserId, child.childProfileId) })));
   const reminders = await listParentReminders(scope, parentUserId);
   return { children: progress, reminders, unreadReminderCount: await getParentUnreadReminderCount(scope, parentUserId) };
 }

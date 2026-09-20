@@ -731,6 +731,7 @@ select:focus,
 .save-retry { margin-left: auto; padding: 7px 14px; border: 0; border-radius: 999px; background: #8a2d13; color: #fff; font-weight: 800; font-size: 12px; cursor: pointer; }
 .save-retry:disabled { opacity: .6; cursor: default; }
 .pace-caveat { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
+.accuracy-withheld { margin: 9px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
 .metric.metric-unreliable strong { color: #98a1b8; }
 /* A gap in the record a teacher can see. */
 .unrecorded-attempts { border-left: 5px solid #e4703f; }

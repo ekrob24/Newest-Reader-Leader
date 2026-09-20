@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { audienceForRole, progressForAudience, readingResultForAudience } from "../../shared/accuracyAudience";
 import { invokeLLM } from "../_core/llm";
 import { protectedProcedure, router } from "../_core/trpc";
 import { scopeForUser } from "../tenantScope";
@@ -298,7 +299,8 @@ export const readerLeaderRouter = router({
       const wordTimings = buildWordTimings(transcript, analysis.durationSeconds, transcription?.segments);
       const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, audioStorageKey, audioStatus, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions, wordStates: analysis.wordStates, wordTimings });
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
-      return { session, analysis, transcriptionStatus, audioStatus };
+      // The reader gets her report without the percentage; the row keeps it for the teacher.
+      return { ...readingResultForAudience({ session, analysis }, audienceForRole(ctx.user.role)), transcriptionStatus, audioStatus };
     }),
     save: protectedProcedure.input(z.object({
       childProfileId: z.number().int().positive(),
@@ -323,7 +325,7 @@ export const readerLeaderRouter = router({
       const wordTimings = buildWordTimings(analysis.transcript, analysis.durationSeconds);
       const session = await saveReadingSession(tenantScope(ctx), { childProfileId: input.childProfileId, materialId: input.materialId, storyTitle: input.storyTitle, transcript: analysis.transcript, accuracy: analysis.accuracy, wordsCorrectPerMinute: analysis.pace, durationSeconds: analysis.durationSeconds, assessmentMode: input.assessmentMode, languageSupport: learnerSettings.languageSupport, practiceWords: analysis.practiceWords, interventions: [...input.demoInterventions, ...interventions], wordStates: analysis.wordStates, wordTimings });
       await createProvisionalMatchReviews(tenantScope(ctx), { sessionId: session.id, childProfileId: input.childProfileId, classId: irishVariantContext.classId, matches: analysis.events.filter(event => event.provisionalIrishEnglish && event.recognisedWord).map(event => ({ expectedWord: event.expectedWord, recognisedWord: event.recognisedWord!, source: event.variantSource })) });
-      return { session, analysis };
+      return readingResultForAudience({ session, analysis }, audienceForRole(ctx.user.role));
     }),
     teacherReview: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       requireTeacher(ctx.user.role);
@@ -364,7 +366,8 @@ export const readerLeaderRouter = router({
     childProgress: protectedProcedure.input(z.object({ childProfileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
       const allowed = await mayAccessChildProfile(tenantScope(ctx), { id: ctx.user.id, role: ctx.user.role }, input.childProfileId);
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "This child profile is not available to your account." });
-      return getChildProgress(tenantScope(ctx), input.childProfileId);
+      const progress = await getChildProgress(tenantScope(ctx), input.childProfileId);
+      return progressForAudience(progress, audienceForRole(ctx.user.role));
     }),
     audioUrl: protectedProcedure.input(z.object({ sessionId: sessionIdInput })).query(async ({ ctx, input }) => {
       const playback = await getSessionPlayback(tenantScope(ctx), input.sessionId);

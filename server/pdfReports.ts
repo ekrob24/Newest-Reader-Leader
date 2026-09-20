@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import type { ReadingSession } from "../drizzle/schema";
+import { ACCURACY_WITHHELD_NOTE, seesAccuracy } from "../shared/accuracyAudience";
 import type { ReportAudience } from "./readerReports";
 
 type Brand = { schoolName: string; accentColor: string; footerLine: string };
@@ -7,6 +8,20 @@ type Comment = { sessionId: string; comment: string; createdAt: Date };
 
 function colorOrDefault(value: string) {
   return /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#2563EB";
+}
+
+/** The snapshot bullets, lifted out of the drawing code so the audience rule can be asserted
+ *  on strings rather than on a compressed PDF content stream. The story-match line is on the
+ *  teacher's copy only: a child or a parent can neither check the judgement behind the
+ *  percentage nor overrule it, and the teacher can do both. */
+export function reportSnapshotLines(input: { audience: ReportAudience; total: number; averageAccuracy: number; averageWcpm: number; latestStoryTitle: string | null }) {
+  return [
+    `Saved Reading Sessions: ${input.total}`,
+    ...(seesAccuracy(input.audience) ? [`Average story match*: ${input.averageAccuracy}%`] : []),
+    `Average WCPM*: ${input.averageWcpm}`,
+    `Latest story: ${input.latestStoryTitle ?? "No saved session yet"}`,
+    ...(seesAccuracy(input.audience) ? [] : [ACCURACY_WITHHELD_NOTE]),
+  ];
 }
 
 export async function createBrandedPdfReport(input: { audience: ReportAudience; childName: string; bookBand: string; sessions: ReadingSession[]; branding: Brand; comments: Comment[] }) {
@@ -27,7 +42,7 @@ export async function createBrandedPdfReport(input: { audience: ReportAudience; 
   document.font("Helvetica").fontSize(11).fillColor("#475569").text(`${input.bookBand} · Prepared ${new Date().toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" })}`, 48, 144);
   document.moveTo(48, 168).lineTo(547, 168).strokeColor(accent).lineWidth(2).stroke();
   document.fillColor("#172554").font("Helvetica-Bold").fontSize(14).text("Reading snapshot", 48, 190);
-  const snapshot = [`Saved Reading Sessions: ${total}`, `Average story match*: ${averageAccuracy}%`, `Average WCPM*: ${averageWcpm}`, `Latest story: ${latest?.storyTitle ?? "No saved session yet"}`];
+  const snapshot = reportSnapshotLines({ audience: input.audience, total, averageAccuracy, averageWcpm, latestStoryTitle: latest?.storyTitle ?? null });
   document.font("Helvetica").fontSize(11).fillColor("#334155").list(snapshot, 62, 216, { bulletRadius: 2, textIndent: 10, lineGap: 5 });
   const heading = input.audience === "child" ? "Your next brave step" : input.audience === "parent" ? "Try this together" : "Teacher feedback and review notes";
   document.fillColor("#172554").font("Helvetica-Bold").fontSize(14).text(heading, 48, 320);

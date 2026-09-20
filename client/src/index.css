@@ -255,10 +255,6 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--reader-gold); o
 .report-main .kicker { color: var(--blue); }
 .report-main h2 { font-family: "Archivo Black", sans-serif; letter-spacing: -1.4px; font-size: 30px; margin: 9px 0 9px; }
 .report-main > p { font-size: 14px; font-weight: 700; line-height: 1.5; color: #3e4a68; max-width: 490px; margin: 0; }
-.metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 168px)); justify-content: start; gap: 8px; margin: 24px 0; }
-.metric { padding: 11px 9px; border: 1.5px solid var(--ink); background: var(--paper); text-align: center; }
-.metric strong { display: block; font-family: "Archivo Black", sans-serif; font-size: 26px; letter-spacing: -1.5px; }
-.metric span { display: block; margin-top: 1px; font-family: "DM Mono", monospace; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
 .report-actions { display: flex; flex-wrap: wrap; gap: 11px; }
 .report-details { margin-top: 27px; display: grid; grid-template-columns: 1.07fr .93fr; gap: 18px; }
 .detail-card { border: 2px solid var(--ink); background: #fffef9; padding: 22px; }

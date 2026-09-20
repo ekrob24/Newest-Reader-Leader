@@ -186,7 +186,18 @@ export default function Home() {
   });
   // Counts what is settled plus what is still being guessed. The cursor keeps up with the
   // child in real time while nothing unsettled reaches the word states or the record.
-  const processedWords = useMemo(() => words(`${liveTranscript} ${interimTranscript}`).length, [liveTranscript, interimTranscript]);
+  // The bar and the highlight must answer from the same place.
+  //
+  // This counted words of raw transcript against words of story - what the recogniser emitted,
+  // not what matched. So the moment the matcher lost the reader, the highlight stopped and the
+  // bar kept advancing, and a child was told to keep going by one element while another had
+  // stopped following her. It is the software asserting something it did not observe, in the
+  // version of that defect a child sees.
+  //
+  // It now counts words the matcher has actually reached, which is what the highlight shows.
+  // When matching stalls the bar stalls with it. That does not fix the matching; it stops the
+  // product claiming progress it cannot see.
+  const processedWords = useMemo(() => wordStates.filter(state => state.status !== "unread" && state.status !== "current").length, [wordStates]);
   const selectedStoryWords = useMemo(() => selectedStory.text.match(/\S+\s*/g) ?? [], [selectedStory]);
   const languageSupport = (childProgress.data?.learnerSettings?.languageSupport || "STANDARD_ENGLISH") as ReadingLanguageSupport;
   const educatorApprovedVariants = childProgress.data?.irishVariantContext?.variants || [];

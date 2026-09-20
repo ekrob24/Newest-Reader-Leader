@@ -163,3 +163,60 @@ export function keepWordsAlreadyRead(previous: LiveWordState[], next: LiveWordSt
     return { ...earlier, attempts: Math.max(earlier.attempts, state.attempts) };
   });
 }
+
+/**
+ * Where the reader is, as distinct from how she is doing.
+ *
+ * Judgement - correct, incorrect, self-corrected - comes from finalised results only, because
+ * interim results are the recogniser thinking aloud and colouring from them turned a word
+ * green, then red, then green. Position has the opposite requirement. One instrumented read
+ * emitted nine finals across seventy-eight seconds, one of them 16,512ms after the interim
+ * that first carried its words, so a cursor waiting for finals sits twenty words behind a
+ * child reading perfectly well - which is what "does not keep up" is.
+ *
+ * This was tried once before and reverted, because it made the cursor flick between the word
+ * being read and the last word on the page. Two causes, both fixed here rather than papered
+ * over:
+ *
+ *   The cursor was clamped into the visible page. Position runs ahead of the page, because the
+ *   page used to turn only on finals, so the clamp parked the cursor on the page's last word.
+ *   There is no clamp now; the page follows the cursor instead.
+ *
+ *   The interim blanks constantly - between revisions, and on the event that carries a final -
+ *   and position fell back to the finals each time, snapping the cursor backwards. It is now
+ *   monotonic within a reading: `advanceReadingPosition` never returns a smaller index, so a
+ *   blank interim leaves the cursor where it was instead of yanking it back.
+ */
+export function liveReadingPosition(states: LiveWordState[]): number {
+  const at = states.findIndex(state => state.status === "current");
+  return at === -1 ? states.length : at;
+}
+
+/**
+ * The cursor only ever moves forwards during a reading.
+ *
+ * A recogniser that revises itself downwards is not the child un-reading a word. Restarting
+ * the reading resets the cursor; nothing else moves it back.
+ */
+export function advanceReadingPosition(previousIndex: number, nextIndex: number): number {
+  return Math.max(previousIndex, nextIndex);
+}
+
+/**
+ * Which class a word wears, given the two streams kept apart above.
+ *
+ *   Judgement always wins. A word the finals have settled keeps its settled colour, cursor or
+ *   no cursor, so an interim can never repaint a word green or red.
+ *   The cursor only ever marks a word nothing has judged yet.
+ *   A monthly assessment shows the cursor and nothing else. That mode is meant to be quiet.
+ *
+ * `settled` is the status from the finals-only derivation; "current" there is just the word
+ * after the last final, so it reads as unjudged rather than drawing a second cursor.
+ */
+export function readerWordClass(settled: LiveWordState["status"] | undefined, atCursor: boolean, mode: LiveAssessmentMode): string {
+  const judgement = settled ?? "unread";
+  const unjudged = judgement === "unread" || judgement === "current";
+  if (mode === "MONTHLY_ASSESSMENT") return atCursor ? "current" : "";
+  if (atCursor && unjudged) return "current";
+  return unjudged ? "unread" : judgement;
+}

@@ -128,12 +128,26 @@ def score_rows(words, spans, ratio, self_corrected=True):
 def build_verdict(rows):
     """The only numbers that matter, computed once so the printing cannot disagree with them."""
     errors = [r for r in rows if r["deliberate"] in TRUE_ERRORS]
-    correct = [r for r in rows if r["deliberate"] is None]
+    # Every word that is not an omission or a substitution was read. That includes the two
+    # words flanking the insertion and the self-corrected one, and they belong in this pool
+    # even though they are also reported separately below.
+    #
+    # An earlier version held the flanking words out of both pools, on the reasoning that the
+    # inserted word damages its neighbours and so their scores are not their own. That
+    # reasoning is right about detecting the insertion and wrong about the threshold: a live
+    # system does not know an insertion happened, so it cannot exempt the words either side.
+    # Holding them out made a word that could only lower the threshold unable to lower it, and
+    # on the first real recording that turned a NO GAP into a reported CLEAN GAP.
+    correct = [r for r in rows if r["deliberate"] not in TRUE_ERRORS]
     if not errors or not correct:
         raise ValueError("no deliberate errors or no correctly-read words to compare")
     worst_correct = min(correct, key=lambda r: r["score"])
     best_error = max(errors, key=lambda r: r["score"])
     gap = worst_correct["score"] - best_error["score"]
+    # The lowest threshold that catches every deliberate error sits just above the highest of
+    # them; these are the correctly-read words it takes with it.
+    false_corrections = sorted((r for r in correct if r["score"] <= best_error["score"]),
+                               key=lambda r: r["score"])
 
     # Empty when the reader did not perform one. Section 2 then reports that, rather than
     # reporting a pass on a test that was never run.
@@ -142,9 +156,10 @@ def build_verdict(rows):
         if row["deliberate"] in NOT_AN_ERROR:
             self_corrections.append({
                 **row,
-                # A self-correction is handled right when it lands with the correctly-read
-                # words, i.e. above the highest true error. Only meaningful if a gap exists.
-                "flagged": gap > 0 and row["score"] <= best_error["score"],
+                # Flagged if it falls at or below the lowest threshold that catches both
+                # errors. It does not depend on a gap existing: a self-correction ends with
+                # the right word said, so scoring it there is a false correction either way.
+                "flagged": row["score"] <= best_error["score"],
             })
 
     before, after = rows[INSERTION_SITE[0]], rows[INSERTION_SITE[1]]
@@ -154,6 +169,9 @@ def build_verdict(rows):
         "best_error": best_error,
         "gap": round(gap, 4),
         "clean_gap": gap > 0,
+        "false_corrections": false_corrections,
+        "false_correction_rate": round(len(false_corrections) / len(correct), 4),
+        "words_read_correctly": len(correct),
         "self_corrections": self_corrections,
         "insertion": {
             "before": before,
@@ -199,7 +217,13 @@ def print_report(rows, verdict):
         print("  deliberate error from every word read correctly - on this one reading.")
     else:
         print(f"\n  NO GAP ({verdict['gap']:.4f}). '{worst['word']}' was read correctly and scores at or below")
-        print(f"  the deliberate '{best['word']}'. No threshold separates them. This approach fails too.")
+        print(f"  the deliberate '{best['word']}'. No threshold separates them cleanly.")
+        print(f"\n  The lowest threshold that catches both errors is just above {best['score']:.4f}, and it")
+        print(f"  also flags {len(verdict['false_corrections'])} of the {verdict['words_read_correctly']} words read correctly "
+              f"- a false-correction rate")
+        print(f"  of {100 * verdict['false_correction_rate']:.1f}% on this reading:")
+        for r in verdict["false_corrections"]:
+            print(f"    '{r['word']}' (#{r['index']}) {r['score']:.4f}")
 
     print("\n" + "=" * 78)
     print("2. THE SELF-CORRECTION - it must NOT be flagged")
@@ -448,6 +472,9 @@ def main():
             "clean_gap": verdict["clean_gap"],
             "worst_correct": verdict["worst_correct"],
             "best_error": verdict["best_error"],
+            "false_correction_rate": verdict["false_correction_rate"],
+            "false_corrections": verdict["false_corrections"],
+            "words_read_correctly": verdict["words_read_correctly"],
             "insertion_uncovered_seconds": verdict["insertion"]["uncovered_seconds"],
             "self_correction_performed": self_corrected,
             "audio_path": audio_path,

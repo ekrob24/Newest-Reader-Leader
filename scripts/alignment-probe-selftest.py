@@ -96,14 +96,44 @@ clean = probe.build_verdict(probe.score_rows(
     WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.88})), ratio=0.02))
 check("errors well below correct reads -> CLEAN GAP", clean["clean_gap"] is True,
       f"gap {clean['gap']}")
-check("the gap is worst-correct minus best-error", abs(clean["gap"] - 0.70) < 1e-6,
+# The self-correction at 0.88 is now the lowest of the correctly-read words, so it sets the gap.
+check("the gap is worst-correct minus best-error", abs(clean["gap"] - 0.68) < 1e-6,
       f"got {clean['gap']}")
+# The regression that turned a real NO GAP into a reported CLEAN GAP: a word beside the
+# inserted one was read, so a low score on it must be able to sink the threshold.
+for flank in (20, 21):
+    sunk = probe.build_verdict(probe.score_rows(
+        WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.88, flank: 0.18})), ratio=0.02))
+    check(f"a low score on '{WORDS[flank]}' beside the insertion sinks the threshold",
+          sunk["clean_gap"] is False and sunk["worst_correct"]["index"] == flank,
+          f"gap {sunk['gap']}, worst '{sunk['worst_correct']['word']}'")
+    check(f"and '{WORDS[flank]}' is counted as a false correction",
+          [r["index"] for r in sunk["false_corrections"]] == [flank])
+    # One in forty words read correctly, not one in forty-two: the two deliberate errors are
+    # not reading opportunities the system got wrong, they are the errors it is meant to catch.
+    check(f"the rate is over the words read correctly, not every row",
+          sunk["false_correction_rate"] == 0.025 and sunk["words_read_correctly"] == 40,
+          f"rate {sunk['false_correction_rate']} (1/42 would be 0.0238), n {sunk['words_read_correctly']}")
+
+# A correctly-read word scoring exactly level with the highest error is caught by the lowest
+# threshold that catches that error, so it is a false correction, not a near miss.
+level = probe.build_verdict(probe.score_rows(
+    WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.88, 7: 0.20})), ratio=0.02))
+check("a correct word level with the highest error counts as a false correction",
+      [r["index"] for r in level["false_corrections"]] == [7],
+      f"got {[r['index'] for r in level['false_corrections']]}")
+check("and that is not a clean gap either", level["clean_gap"] is False, f"gap {level['gap']}")
 check("the highest error is the substitution, not the omission",
       clean["best_error"]["word"] == "hedgehog")
 check("the self-correction is reported at all", len(clean["self_corrections"]) == 1,
       f"got {len(clean['self_corrections'])}")
 check("a self-correction scoring high is not flagged",
       all(r["flagged"] is False for r in clean["self_corrections"]) and clean["self_corrections"] != [])
+
+check("with nothing overlapping there are no false corrections", clean["false_corrections"] == [])
+check("and the rate is zero over every word read correctly",
+      clean["false_correction_rate"] == 0.0 and clean["words_read_correctly"] == 40,
+      f"rate {clean['false_correction_rate']}, n {clean['words_read_correctly']}")
 
 print("\nbuild_verdict - the separations that must NOT be claimed")
 overlap = probe.build_verdict(probe.score_rows(
@@ -130,13 +160,15 @@ flagged = probe.build_verdict(probe.score_rows(
     WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.15})), ratio=0.02))
 check("a self-correction scoring low IS flagged as a false correction",
       [r["flagged"] for r in flagged["self_corrections"]] == [True])
+check("and it drags the threshold, because the child did read the word",
+      flagged["clean_gap"] is False and flagged["worst_correct"]["index"] == 35,
+      f"gap {flagged['gap']}, worst '{flagged['worst_correct']['word']}'")
 check("a self-correction never counts as one of the errors",
       all(r["deliberate"] != "self_correction" for r in flagged["errors"]))
-check("nor as one of the correctly-read words",
-      flagged["worst_correct"]["deliberate"] is None)
-check("nor do the words flanking the insertion",
-      all(r["index"] not in (20, 21) for r in flagged["errors"])
-      and flagged["worst_correct"]["index"] not in (20, 21))
+check("but does count among the words read correctly, which is what it was",
+      flagged["worst_correct"]["deliberate"] == "self_correction")
+check("the words flanking the insertion are never errors",
+      all(r["index"] not in (20, 21) for r in flagged["errors"]))
 
 print("\na recording with no self-correction in it (--no-self-correction)")
 absent = probe.score_rows(
@@ -163,11 +195,16 @@ dragging = probe.build_verdict(probe.score_rows(
 check("a low score on it can now produce NO GAP", dragging["clean_gap"] is False,
       f"gap {dragging['gap']}, worst correct '{dragging['worst_correct']['word']}'")
 check("and it is named as the offending word", dragging["worst_correct"]["index"] == 35)
-# Held out of both pools - the old behaviour - the same audio would have claimed a clean gap.
+# The label no longer changes the arithmetic - a self-correction is in the correct pool too -
+# so the two readings of identical spans must now agree on the gap and differ only in what
+# section 2 says happened.
 held_out = probe.build_verdict(probe.score_rows(
     WORDS, spans_for(scores_where(0.90, {13: 0.10, 25: 0.20, 35: 0.15})), ratio=0.02,
     self_corrected=True))
-check("which labelling it as a self-correction would have hidden", held_out["clean_gap"] is True)
+check("the label no longer changes the gap", held_out["gap"] == dragging["gap"],
+      f"{held_out['gap']} vs {dragging['gap']}")
+check("it only changes whether a self-correction is reported",
+      len(held_out["self_corrections"]) == 1 and dragging["self_corrections"] == [])
 
 buffer = io.StringIO()
 with contextlib.redirect_stdout(buffer):

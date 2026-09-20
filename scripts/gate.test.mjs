@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { summariseVitest, summarisePlaywright, verdict } from "./gate.mjs";
+import { playwrightFailure, summariseVitest, summarisePlaywright, verdict, vitestFailures } from "./gate.mjs";
 
 /**
  * The failure this script exists to prevent is a green verdict over a gate that never ran.
@@ -100,5 +100,54 @@ describe("reading the Playwright run", () => {
       expect(journeys.some(journey => journey.status === "missing")).toBe(true);
       expect(verdict(passingGate, journeys)).toBe(false);
     }
+  });
+});
+
+describe("saying what actually failed", () => {
+  it("names each failing test, its file, and the first line of why", () => {
+    const failures = vitestFailures({ testResults: [
+      { name: "D:\\rl\\server\\reviewQueue.integration.test.ts", assertionResults: [
+        { status: "passed", fullName: "fine" },
+        { status: "failed", fullName: "orders the queue", failureMessages: ["\u001b[31mAssertionError\u001b[39m: expected 3 to be 2\n  at line 9\n"] },
+      ] },
+      { name: "/home/e/rl/server/reader.test.ts", assertionResults: [
+        { status: "failed", title: "scores a reading", failureMessages: [] },
+      ] },
+    ] });
+    expect(failures).toEqual([
+      { file: "reviewQueue.integration.test.ts", name: "orders the queue", message: "AssertionError: expected 3 to be 2" },
+      { file: "reader.test.ts", name: "scores a reading", message: "" },
+    ]);
+  });
+
+  it("returns nothing when nothing failed, and survives an unreadable report", () => {
+    expect(vitestFailures({ testResults: [{ name: "a.test.ts", assertionResults: [{ status: "passed" }] }] })).toEqual([]);
+    expect(vitestFailures(null)).toEqual([]);
+  });
+
+  it("pulls the journey's own error text out, stripped of colour codes", () => {
+    const report = { suites: [{ specs: [{ title: "the demo journey", ok: false, tests: [{ results: [{
+      error: { message: "Error: \u001b[31mexpect(received)\u001b[39m.toHaveCount(expected)\n\nExpected: 2\nReceived: 0\n" },
+    }] }] }] }] };
+    const why = playwrightFailure(report, "the demo journey");
+    expect(why).toContain("toHaveCount");
+    expect(why).toContain("Expected: 2");
+    expect(why).not.toContain("\u001b");
+  });
+
+  it("falls back to the errors array, and returns empty for a journey it cannot find", () => {
+    const report = { suites: [{ specs: [{ title: "the demo journey", ok: false, tests: [{ results: [{ errors: [{ message: "boom" }] }] }] }] }] };
+    expect(playwrightFailure(report, "the demo journey")).toBe("boom");
+    expect(playwrightFailure(report, "a dropped function word does not stop the reading")).toBe("");
+    expect(playwrightFailure(null, "the demo journey")).toBe("");
+  });
+});
+
+describe("the runner's own tests", () => {
+  it("notices when its own test file was not collected", () => {
+    const withoutOwn = summariseVitest({ testResults: [{ name: "server/reader.test.ts", assertionResults: [{ status: "passed" }] }] });
+    expect(withoutOwn.ownTestsRan).toBe(false);
+    const withOwn = summariseVitest({ testResults: [{ name: "D:\\rl\\scripts\\gate.test.mjs", assertionResults: [{ status: "passed" }] }] });
+    expect(withOwn.ownTestsRan).toBe(true);
   });
 });

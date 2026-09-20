@@ -9,6 +9,10 @@ import { ParentDashboard } from "@/components/ParentDashboard";
 import { trpc } from "@/lib/trpc";
 import type { MaterialRightsSource } from "../../../drizzle/schema";
 import { deriveLiveWordStates, firstGuidedModelWord, initialLiveWordStates, keepWordsAlreadyRead, type LiveWordState } from "@shared/liveWordStates";
+import kiteArtwork from "../assets/story-art/kite.webp";
+import lanternArtwork from "../assets/story-art/lantern.webp";
+import plantArtwork from "../assets/story-art/plant.webp";
+import robotArtwork from "../assets/story-art/robot.webp";
 import { hasChildReadingEvidence, readingCapture, readingCaptureMessage } from "@shared/readingEvidence";
 import { installOnDeviceSpeech, onDeviceAvailability, sendsVoiceOffDevice, speechModeNotice, type SpeechMode } from "@shared/onDeviceSpeech";
 import { SAVE_PENDING, childSaveMessage, isSaved, type SaveOutcome } from "@shared/saveOutcome";
@@ -594,7 +598,40 @@ function LibraryView({ name, profile, progress, minutesRead, quizHistory, latest
   return <div className="view-wrap student-library"><section className="hero-grid student-library-hero"><div><div className="kicker">{name}’s Reading Progress</div><h1 className="title">Choose your<br /><span className="marker">next story.</span></h1><p className="subtitle">Pick a story, read it in your own voice, and find one small thing to grow today. There is no rush—strong readers keep going.</p><div className="library-actions"><button className="primary-cta pressable" onClick={() => chooseStory(libraryStories[0] || stories[0])}><Mic size={18} /> Start today’s read</button><button className="secondary-cta pressable" onClick={() => playSpeech((libraryStories[0] || stories[0]).text)}><Headphones size={18} /> Hear a model</button></div></div><aside className="progress-card"><span className="eyebrow">Your reading progress</span><div className="progress-big"><strong>{sessionsCompleted}</strong><span>{sessionsCompleted === 1 ? "story read" : "stories read"}</span></div><div className="progress-stats"><span><b>{minutes}</b> minutes this week</span></div><p><Flame size={15} fill="currentColor" /> {ACCURACY_WITHHELD_NOTE}</p></aside></section>{profile && <section className="connection-card"><div><div className="kicker">Your connections</div><strong>Family code: <b>{profile.familyCode}</b></strong><p>Share this code with your parent. They can connect their own protected account to celebrate your reading progress.</p></div><form onSubmit={event => { event.preventDefault(); if (classCode.trim()) joinClass(classCode.trim()); }}><label>Class code<input value={classCode} onChange={event => setClassCode(event.target.value.toUpperCase())} placeholder="CLASS-AB12CD" /></label><button className="compact-action pressable" disabled={joining} type="submit">{joining ? "Connecting…" : "Join my class"}</button></form></section>}{profile && latestSessionId && <section className="child-report-card"><div><div className="kicker">My reading celebration</div><strong>Bring your reading wins home.</strong><p>Download a bright summary of your latest saved session to share with a grown-up.</p></div><ReportDownloadButton childProfileId={profile.id} audience="child" label="Download my PDF" /></section>}<section><div className="section-heading"><h2>{assignedStories.length ? "Your teacher assigned" : "Pick your next story"}</h2><p>Levels are friendly guides, not tests.</p></div><div className="story-grid">{libraryStories.map(story => <article className="story-card pressable" key={story.id}><StoryArt story={story} /><div className="story-meta"><span className="level-pill" style={{ "--pill": story.color } as React.CSSProperties}>{story.level}</span><span>{story.duration}</span></div><h3>{story.title}</h3><p>{story.description}</p><button className="compact-action pressable" onClick={() => chooseStory(story)}>Open story <ChevronRight size={15} /></button></article>)}</div></section>{quizHistory.length > 0 && <section className="quiz-history"><div><div className="kicker">My quiz progress</div><h2>Every try helps your brain grow.</h2></div><div className="history-row">{quizHistory.slice(0, 4).map((attempt, index) => <span key={attempt.id}><b>{attempt.score}/{attempt.totalQuestions}</b><small>Attempt {quizHistory.length - index}</small></span>)}</div></section>}<section className="progress-strip"><div className="progress-copy"><h3>Your next<br />small step.</h3><p>Open your latest story again and read one sentence you enjoyed with a smooth, steady voice.</p><button className="compact-action pressable" style={{ marginTop: 12 }} onClick={() => chooseStory(libraryStories[0] || stories[0])}>Practise now <ChevronRight size={15} /></button></div><div className="achievement-row cognitive-pillars"><div className="achievement"><span className="achievement-icon"><Award size={20} /></span>Memory</div><div className="achievement"><span className="achievement-icon"><Sparkles size={20} /></span>Attention</div><div className="achievement"><span className="achievement-icon"><Gauge size={20} /></span>Processing Speed</div><div className="achievement"><span className="achievement-icon"><Volume2 size={20} /></span>Phonics / Sequencing</div></div></section></div>;
 }
 
-function StoryArt({ story }: { story: Story }) { return <div className="story-art" style={{ "--art-bg": story.color, "--art-accent": story.accent } as React.CSSProperties}>{story.art === "kite" && <><span className="sun" /><span className="hill" /><span className="kite" /></>}{story.art === "plant" && <><span className="sun" /><span className="hill" /><span className="plant" /></>}{story.art === "robot" && <><span className="sun" /><span className="hill" /><span className="robot" /></>}{story.art === "lantern" && <><span className="sun" /><span className="hill" /><span className="lantern" /></>}</div>; }
+/**
+ * The story illustrations.
+ *
+ * Imported as files rather than written into the source as data URIs. The build E was shown
+ * carried them inline, and the one she opened in DevTools was a WebP header followed by a long
+ * run of zero bytes - a picture truncated into something that decodes to nothing, which is why
+ * the cards sometimes showed art and sometimes did not. Imported this way, Vite emits each file
+ * with a content hash and bakes the URL into the bundle, so a missing or corrupt file fails the
+ * build rather than the child's screen.
+ */
+const storyArtwork: Record<Story["art"], { src: string; alt: string }> = {
+  kite: { src: kiteArtwork, alt: "A child in a yellow coat running with a red kite under a crescent moon." },
+  lantern: { src: lanternArtwork, alt: "A glowing lantern among leaves, with a hedgehog peeping out and fireflies around it." },
+  plant: { src: plantArtwork, alt: "A child in a straw hat kneeling to plant a green seedling, with a watering can and a worm." },
+  robot: { src: robotArtwork, alt: "A child and a small robot sharing an umbrella and splashing in the rain." },
+};
+
+function StoryArt({ story }: { story: Story }) {
+  // The drawn shapes are the fallback and only the fallback. They are not painted behind the
+  // picture, because a sun and a hill showing through a finished illustration looks like a
+  // rendering fault rather than a design. They appear when, and only when, the picture does
+  // not load, so the card is never an empty box or a broken-image icon.
+  const [artworkFailed, setArtworkFailed] = useState(false);
+  const artwork = storyArtwork[story.art];
+  return <div className="story-art" style={{ "--art-bg": story.color, "--art-accent": story.accent } as React.CSSProperties}>
+    {artworkFailed ? <>
+      <span className="sun" /><span className="hill" />
+      {story.art === "kite" && <span className="kite" />}
+      {story.art === "plant" && <span className="plant" />}
+      {story.art === "robot" && <span className="robot" />}
+      {story.art === "lantern" && <span className="lantern" />}
+    </> : <img className="story-artwork" src={artwork.src} alt={artwork.alt} loading="lazy" decoding="async" onError={() => setArtworkFailed(true)} />}
+  </div>;
+}
 
 function VocabularySoundWarmUp({ story, onClose, onBegin }: { story: Story; onClose: () => void; onBegin: () => void }) {
   const focusWords = words(story.text).filter((word, index, all) => word.length >= 6 && all.findIndex(item => item.toLowerCase() === word.toLowerCase()) === index).slice(0, 3);

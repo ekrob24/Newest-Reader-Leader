@@ -78,6 +78,12 @@ jobs:
         if: always()
         run: node scripts/assert-test-coverage.mjs vitest-report.json
 
+      # An assertion that cannot fail is worse than no assertion, because it is green and gets
+      # quoted. Three have been written in this repository and none was caught by reading it.
+      - name: Assert no always-true assertions
+        if: always()
+        run: node scripts/assert-test-quality.mjs
+
       - name: Build
         run: pnpm build
 

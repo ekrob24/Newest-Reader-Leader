@@ -362,3 +362,107 @@ it. `scripts/alignment-probe2.py` exists to answer it and has not been run.
 
 And everything above is one adult in one quiet room. The multi-reader measurement still has to
 happen, and it has to include Irish accents and at least one child.
+
+---
+
+# Storage, and three things the audit changed about how we review
+
+## An error message is an assertion too
+
+`reading.processRecording` stored the posted bytes and *then* transcribed them. On a
+deployment without an `OPENAI_API_KEY` — which this project deliberately does not set —
+transcription failed, the route returned an error, and the object stayed written. Every call
+stored something and reported failure.
+
+This is the project's characteristic defect arriving inverted. Every previous instance was the
+system asserting a **success** it had not observed: "Your reading practice was saved" when it
+was not, "no approved quiz yet" while serving one, "twenty seconds" for a three-second read, a
+0% reading congratulated as perseverance. This one asserts a **failure** while having
+succeeded. Same root: the reported outcome does not match what happened.
+
+So the review question generalises. **"Does this claim have a source?" applies to the failure
+path exactly as it applies to the happy path.** And the failure path is the worse place for it
+to go wrong, because a route that appears broken gets ignored rather than investigated. This
+one could have run for months looking like a bug.
+
+The fix was to delete the write, not to reorder it. The bytes were already in memory for
+transcription, nothing ever read the object back, and the key went into a variable that was
+never used.
+
+## A function that cannot reject is not validation
+
+`safeAudioMimeType` maps `audio/webm`, `audio/ogg` and `audio/wav` to themselves and
+**everything else to `audio/webm`**. It has no failure case. The bytes are never inspected, so
+a zip, an image or an HTML file was accepted and stored as `.webm` with an audio content type.
+
+A coercion cannot fail, so it never checks — and being named `safe…` it reads, at a glance,
+like the check that is not happening. Whatever a normaliser is called, it is not validation,
+and the two should not be confused in review.
+
+## Assert the shape before matching the content
+
+Three assertions in this repository have asserted nothing, and none was caught by reading it
+back:
+
+- `expect(true).toBe(true)`, standing in for a note that belonged in a comment.
+- `all(... for r in [])`, vacuously true, short-circuiting past the real check behind it.
+- Five `toMatch` assertions against a value that was always the empty string, because a
+  response envelope was not being unwrapped. All five passed. The suite was green.
+
+The third is the one worth recording, because it is this project's own defect — asserting
+something that was never observed — appearing **inside the mechanism built to catch that
+defect**. Only mutation testing found it.
+
+**The rule: never match on a value you have not first proven is non-empty and of the type you
+think it is.** `scripts/assert-test-quality.mjs` enforces the part that can be expressed
+mechanically and runs in CI; the rest lives here, because a rule nobody can see is not a rule.
+
+And the standard for a finding, which the audit settled: **pin it with a test whose assertions
+go red when the fix lands**, and prove that by writing each plausible fix as a mutation and
+checking which assertions it turns red. Whoever fixes it then has to come to that file and
+state the new behaviour, so the fix cannot be partial and the finding cannot quietly evaporate.
+
+## Teacher uploads and children's voices are in the same store
+
+A stated fact about the current architecture, because it changes what the DPIA has to cover.
+
+| prefix | contents |
+| --- | --- |
+| `reader-leader/recordings/{userId}/` | children's reading recordings |
+| `reader-leader/materials/{teacherUserId}/` | teacher-uploaded source documents |
+| `demo-playback/` | a generated test tone |
+
+**Same bucket, same credentials, same proxy.** Every question asked about recordings applies
+unchanged to teacher uploads, and the data protection summary does not mention them at all.
+
+Open question, wanting a position rather than a code change: a product that invites teachers to
+upload reading passages **will** receive copyrighted texts. The likely answer is a curated
+licensed corpus so that teachers do not need to upload at all, plus a warranty at the point of
+upload for the cases where they still do.
+
+## Decision: object storage moves before any deployment that stores real audio
+
+Not a question to answer — a decision with a deadline.
+
+The presign call carries a full path and no bucket or prefix:
+
+```
+GET {forgeUrl}/v1/storage/presign/get?path={key}
+Authorization: Bearer {forgeKey}
+```
+
+So the scope of what those credentials can reach is a property of the Forge key, which this
+repository can neither see nor set. **We cannot ship children's voice recordings on a storage
+credential whose scope we cannot inspect.** Not to a school, not with a DPIA, not with a
+processor agreement that has to say where the data sits and who can reach it. "We do not know
+what our storage key is bound to" is not an answerable position in front of a DPO.
+
+**Before any deployment that stores real audio:** an S3-compatible bucket in an EU region that
+we control, an explicit bucket policy, per-object keys we issue, and **no route anywhere that
+presigns a caller-supplied path**. Consistent with the containerised deployment already chosen,
+and it retires the class of problem rather than answering one question about it.
+
+Still worth running once credentials are in hand, as diagnosis rather than a prerequisite:
+presign a path outside the `reader-leader/` prefix and see whether Forge refuses. That tells us
+what was historically exposed. It touches a possibly shared store, so it gets said out loud
+before it is run.

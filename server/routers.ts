@@ -10,7 +10,6 @@ import { analyseReadingText } from "./reader";
 import { readerLeaderRouter } from "./routers/readerLeader";
 import { verifyDemoCredentials } from "./demoAuth";
 import { provisionLocalDemoCohort } from "./readerDb";
-import { storagePut } from "./storage";
 
 const MAX_AUDIO_BYTES = 4_500_000;
 
@@ -56,8 +55,13 @@ export const appRouter = router({
       const bytes = Buffer.from(input.audioBase64, "base64");
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_AUDIO_BYTES) throw new Error("Keep this practice recording under 4.5 MB and try again.");
       const mimeType = safeAudioMimeType(input.audioMime);
-      const extension = mimeType.split("/")[1] ?? "webm";
-      const { key } = await storagePut(`reader-leader/recordings/demo-${Date.now()}.${extension}`, bytes, mimeType);
+      // Nothing is stored. The bytes are already in memory and go straight to transcription;
+      // no route ever read the object back, and the key was assigned to a variable that was
+      // never used. Storing them made this an unauthenticated write endpoint under the
+      // project's own storage credentials - no account, no rate limit, no content-type check
+      // and no deletion - which is a lifecycle we would then have had to build and keep
+      // working. The authenticated path already scores and discards within the request; this
+      // now does the same, and the whole class of problem goes rather than being bounded.
       const transcription = await transcribeAudio({ audio: bytes, mimeType, language: "en", prompt: "..." });
       if ("error" in transcription) throw new Error(transcription.error);
       return { ...analyseReadingText(input.expectedText, transcription.text, input.durationSeconds), transcriptionStatus: "transcribed" as const };

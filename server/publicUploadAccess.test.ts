@@ -6,25 +6,30 @@ import { appRouter } from "./routers";
 import { createContext } from "./_core/context";
 
 /**
- * What `reading.processRecording` requires of a caller: nothing.
+ * `reading.processRecording` is open to anyone and now stores nothing.
  *
- * Documents a finding, not a design. The route is a `publicProcedure`, which in this codebase
- * is `t.procedure` with no middleware at all, and it calls `storagePut` BEFORE it transcribes.
- * So an anonymous caller can post bytes and have them persisted under this project's own
- * storage credentials, with no account, no rate limit and no trace.
+ * It remains a `publicProcedure`, which in this codebase is `t.procedure` with no middleware
+ * at all: the no-account demo read is meant to work without signing in, and that part is
+ * deliberate. What was not deliberate was the `storagePut` it used to make first, which turned
+ * an open endpoint into an unauthenticated write under this project's own storage credentials
+ * - no account, no rate limit, no content-type check, no deletion.
  *
- * The ordering matters more than the guard: because the store happens first, a failure
- * anywhere after it - including the transcription failing for want of an OPENAI_API_KEY this
- * project deliberately does not set - still leaves the object written. On such a deployment
- * every call to this route stores the bytes and then returns an error. That is a write
- * primitive that reports failure.
+ * The ordering was the sharper half of it. Because the store came before the transcription,
+ * everything that failed afterwards still left the object written, including transcription
+ * failing for want of an OPENAI_API_KEY this project deliberately does not set. Such a
+ * deployment stored every posted object and then returned an error: a write primitive that
+ * reported failure, which is the worst kind to inherit because a route that looks broken gets
+ * ignored rather than investigated.
  *
- * Storage is unconfigured under test, so a request that reaches the handler fails inside
- * `storagePut` with StorageUnavailableError. That specific failure is the proof of reach: an
- * authenticated route would have returned UNAUTHORIZED without ever touching storage.
+ * The fix was to delete the call. The bytes were already in memory for transcription, nothing
+ * ever read the object back, and the key went into a variable that was never used. So these
+ * assertions now hold the route to storing nothing, and they fail if a `storagePut` returns:
+ * with storage unconfigured under test, any code path that tries to store dies inside it with
+ * StorageUnavailableError, which is exactly what these tests assert does NOT happen.
  *
- * Written so that adding authentication, or storing nothing, BREAKS these assertions. Whoever
- * fixes this has to come here and state the new behaviour.
+ * Still unguarded and recorded as such: no rate limit, no count limit, and a content type that
+ * is coerced rather than checked. Those cost nothing while the route stores nothing, and they
+ * become real again the moment anybody re-adds a write here.
  */
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -71,15 +76,16 @@ async function errorMessage(response: Response) {
 }
 
 describe("POST reading.processRecording with no session", () => {
-  it("is not refused for want of an account", async () => {
-    const response = await post(payload());
-    expect(await errorMessage(response)).not.toMatch(/unauthor|sign in|log in/i);
+  it("is not refused for want of an account, because the demo read is meant to work signed out", async () => {
+    expect(await errorMessage(await post(payload()))).not.toMatch(/unauthor|sign in|log in/i);
   });
 
-  it("reaches storage before anything can stop it", async () => {
-    // StorageUnavailableError is raised inside storagePut. Getting this far means the bytes
-    // would have been written on a deployment where storage IS configured.
-    expect(await errorMessage(await post(payload()))).toMatch(/storage config missing/i);
+  it("stores nothing: it never reaches storage at all", async () => {
+    // Storage is unconfigured here, so any attempt to store raises StorageUnavailableError
+    // and says so. Reaching transcription instead is the proof that nothing was written.
+    const message = await errorMessage(await post(payload()));
+    expect(message).not.toMatch(/storage config missing/i);
+    expect(message).toMatch(/transcription service is not configured/i);
   });
 
   it("accepts bytes that are not audio, because the type is coerced and never checked", async () => {
@@ -90,8 +96,8 @@ describe("POST reading.processRecording with no session", () => {
     for (const mime of ["application/zip", "image/png", "text/html", undefined]) {
       const response = await post(payload({ audioBase64: zipMagic, audioMime: mime }));
       const message = await errorMessage(response);
-      expect(message, String(mime)).not.toMatch(/type|format|not audio/i);
-      expect(message, String(mime)).toMatch(/storage config missing/i);
+      expect(message, String(mime)).not.toMatch(/unsupported|not audio/i);
+      expect(message, String(mime)).toMatch(/transcription service is not configured/i);
     }
   });
 
@@ -101,9 +107,9 @@ describe("POST reading.processRecording with no session", () => {
   });
 
   it("applies no rate or count limit: repeated anonymous posts are all accepted alike", async () => {
-    // Nothing in the codebase rate-limits. Five in a row behave identically to the first,
-    // and each one is a stored object on a configured deployment.
+    // Nothing in the codebase rate-limits. Harmless while nothing is stored, and the reason
+    // this must be reconsidered the moment anyone adds a write back to this route.
     const messages = await Promise.all(Array.from({ length: 5 }, () => post(payload()).then(errorMessage)));
-    expect(messages.every(message => /storage config missing/i.test(message))).toBe(true);
+    expect(messages.every(message => /transcription service is not configured/i.test(message))).toBe(true);
   });
 });

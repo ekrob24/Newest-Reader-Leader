@@ -270,12 +270,23 @@ down here.
 **Fifth: `effectiveCaptureTime` in `shared/captureTime.ts` has no production caller.** It is
 the function that decides which instant a reading is ordered by - the device's clock when the
 device's clock was trusted, the server's otherwise - and it is imported only by its own test.
-Found while establishing why `sessionIdentity.integration.test.ts` reports a one-hour gap
-between `createdAt` and the instant it was written: server-generated timestamps come back
-skewed by the difference between the MySQL session's timezone and the reading machine's, and
-`effectiveCaptureTime` is the one place a skewed server time would be compared against an
-unskewed device time. Because nothing calls it, that comparison is latent rather than live.
-It was not found by reading the code either; it was found by chasing a failing assertion.
+Found while chasing the one-hour gap `sessionIdentity.integration.test.ts` reports between
+`createdAt` and the instant it was written. `effectiveCaptureTime` is the one place a
+server-generated timestamp would be compared against a device-generated one, so if the two
+are converted differently it is where that would surface. Because nothing calls it, that
+comparison is latent rather than live. It was not found by reading the code either; it was
+found by chasing a failing assertion.
+
+**The cause of that gap is open, and the first answer given for it was wrong.** It was
+attributed to MySQL's session timezone differing from the reading machine's. Measured on the
+affected machine, that is refuted: `SYSTEM`/`SYSTEM`, Europe/London, and `NOW()` read back at
+14:45:13.000Z against a clock reading 14:45:13.188Z. The instrument that produced that "no
+skew" was itself the defect - it measured `NOW()`, a function, when the failing assertion
+reads a `TIMESTAMP` column, which MySQL converts through the session timezone on the way in
+and on the way out. A diagnostic that measures the wrong thing with correct arithmetic returns
+a confident wrong answer, which is the same failure as a test that cannot fail.
+`scripts/clock-skew.mjs` now measures the column, against the instant each row's own ULID was
+minted, and the question stays open until it has been run.
 
 At five, the pattern is the finding. Something here is repeatedly built one step ahead of the
 thing that would use it, and the gap is only ever closed by accident. Two defences are worth

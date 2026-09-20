@@ -147,3 +147,135 @@ behind them.
 
 What I would not cut: the deadline on processing, and removing the accuracy claim. A
 hanging spinner and a fabricated percentage are the two failures this week has been about.
+
+---
+
+# Forced alignment: what it answered, and what it did not
+
+Added after the transcription measurement above. The transcription runs all asked one
+question — *what did she say* — over a fifty-thousand-word vocabulary, and `initial_prompt`
+and `hotwords` are both ways of leaning on that same decoder, so they failed the same way.
+Forced alignment asks a different question: for each expected word in turn, how well does
+this audio match *this* word. Closed vocabulary, one target, one score per word.
+
+`torchaudio.functional.forced_align` with the `MMS_FA` bundle. One adult, one passage, one
+quiet room, forty-two words. Indicative, not a number to quote.
+
+## It fixes the failure that killed the transcription route
+
+`little`, `Amina`, `stood` and `safely` were all reported wrong by transcription although
+they were read correctly. Alignment scores them 0.9488, 0.8468, 0.9985 and 0.8422 — far
+above both deliberate errors. The specific failure is gone.
+
+## It does not produce a clean threshold
+
+| | |
+| --- | --- |
+| omission `golden`, not read | 0.3978 |
+| substitution `hedgerow` for `hedgehog`, not read | 0.4132 |
+| lowest word **read correctly** — `gate` | **0.1864** |
+
+No threshold separates them. The lowest threshold catching both errors also flags `gate`:
+one false correction in forty words of reading opportunity, 2.5%, against a ≤2% gate.
+
+An earlier version of the probe reported a clean gap of +0.086. That was wrong, and the
+cause was in our own code: it held the two words flanking an inserted word out of the
+comparison, which stopped a word that could only lower the threshold from lowering it. A
+live system does not know an insertion happened and cannot exempt anything.
+
+## The missing arc, confirmed for omissions and refuted for insertions
+
+Both contaminated words sat beside a place where the script did not match the speech, and
+linear forced alignment has no arc for a word that is not in the script: every frame must
+be accounted for by some word in the chain, so unscripted audio is absorbed by a neighbour.
+
+Tested directly — same audio, same emission computed once, only the word sequence differing:
+
+| | before | after | change |
+| --- | --- | --- | --- |
+| `made`, with the omission written into the script | 0.4990 | **0.9560** | +0.4570 |
+| `gate`, with the insertion written into the script | 0.1864 | **0.2359** | +0.0495 |
+
+The omission mechanism is confirmed: `made` returned to the normal band and its span grew
+from 0.38s to 0.62s, taking back the audio that had been forced onto the absent word. The
+insertion mechanism is refuted: `gate` barely moved, while the inserted `wooden` scored
+0.8415, so the aligner is confident the extra word is there and still does not find a
+convincing `gate` after it. That word's low score has some other cause.
+
+The control was exact both times — forty-one of forty-two words identical to four decimal
+places, spans included. A script/speech mismatch stays local rather than spreading down the
+reading. Caveat: Viterbi is globally optimal, so locality is a property of this recording's
+strong acoustic evidence, not a guarantee of the method. Re-check it on a mumbling child
+before relying on it.
+
+## Deferred decision: a flexible alignment graph
+
+**This is the correct engineering answer for insertions and omissions, and we are choosing
+not to do it this week.**
+
+Replace the linear chain of expected words with a graph carrying skip arcs, repeat arcs and
+a garbage arc between every pair of words, so inserted speech has somewhere to go instead of
+being absorbed by a neighbour. This is what reading tutors have done since the LISTEN work
+at CMU, and it is the established approach rather than an invention.
+
+The `gate` result narrows what it will buy us — it does not remove the missing arc, but it
+shows that at least one contaminated word had a different cause, so a graph alone should not
+be expected to clear the whole problem.
+
+**Estimate: 16–24 hours.** Building the graph from the expected passage 4; a CTC decoder over
+it rather than `forced_align`, which only takes a linear target 8; garbage-arc weighting and
+the calibration that goes with it 4; tests and a measurement run 6. The wide end is because
+`torchaudio.functional.forced_align` cannot express this, so it means either a custom Viterbi
+over a hand-built graph or a dependency such as `k2`/`kaldi`, and that choice is not made.
+
+## Deferred probe: the unprompted transcript as a second, differently-failing signal
+
+The unprompted Whisper transcript is useless for scoring — that is the 7.1% above. But a word
+in it that appears nowhere in the expected passage is *insertion evidence*, and it fails
+differently from alignment. The timing signal cannot do this job: in the probe reading the
+0.36s of uncovered audio at the insertion was smaller than five ordinary between-word pauses,
+the longest of which was 1.34s. Two weak signals that fail in different ways may do what
+neither does alone.
+
+Probe-sized, perhaps 4 hours, and not now.
+
+## The measurement changed
+
+False-correction rate is the right metric for software that scores a child on its own. We are
+not building that, and the last surface where we pretended to has been removed. What we are
+building tells a teacher where to listen; she confirms or overturns, and nothing counts until
+she does. A word ranked wrongly low costs her ten seconds; a word scored wrongly costs a child
+a false record.
+
+So the measurements are **recall@k** — with the k lowest-scoring words surfaced, what fraction
+of the real errors does she see — and **review cost** in words and minutes against the ten to
+fifteen minutes a running record costs today. Both live in `shared/reviewRanking.ts`. On the
+probe reading both errors were ranks 2 and 3 of 42, which with two errors is an anecdote and
+not a rate.
+
+## What the multi-reader run must produce
+
+Designed in now because it is expensive to retrofit:
+
+- **Per-word scores retained per reader**, same passage for everyone, accumulating in
+  `probe-results/reading-corpus.jsonl`. This is the reference distribution.
+- **Every word tagged by shape** — syllable count, coda type, position against punctuation
+  (`scripts/wordshape.py`). The open question is whether score varies with the *word* rather
+  than with correctness. The two lowest correctly-read words were `gate` (short, stop-final,
+  before a comma) and `hedge` (short, affricate-final, sentence-final). Two words is nothing,
+  but a systematic underscore false-flags the same words for every child, which is far worse
+  than a random one.
+- **If that hypothesis survives, a single global threshold is the wrong instrument**, because
+  a word's score would partly measure the word. The standard answer is normalisation: compare
+  a word's score to the distribution for *that word* across readers who read it correctly.
+  The corpus above is exactly that distribution.
+
+## Still unmeasured
+
+Self-correction. It was missing from the first recording and it is the most common thing a
+real child does: a child who says "hedge— hedgehog" has read the word correctly. If alignment
+scores that like an error we flag exactly the readers working hardest, and no threshold fixes
+it. `scripts/alignment-probe2.py` exists to answer it and has not been run.
+
+And everything above is one adult in one quiet room. The multi-reader measurement still has to
+happen, and it has to include Irish accents and at least one child.

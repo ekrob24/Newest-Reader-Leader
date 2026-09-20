@@ -46,7 +46,7 @@ import { normaliseIrishReadingWord, type EducatorApprovedIrishVariant } from "..
 import { newSessionId } from "../shared/sessionId";
 import { resolveCaptureTime } from "../shared/captureTime";
 import { buildReadingWordRows, resolutionsByWordEventId, type ReadingWordProvenance } from "../shared/readingWordRows";
-import { accuracyFromWords, countsAgainstScore, isReviewComplete, settledCorrectWordCount } from "../shared/readingWordScore";
+import { accuracyFromWords, countsAgainstScore, discardedErrorCount, isReviewComplete, settledCorrectWordCount } from "../shared/readingWordScore";
 
 /**
  * The engine and policy behind a word judgement. `provider` names the alignment engine, not
@@ -682,10 +682,14 @@ export async function saveTeacherInterventionDecision(scope: TenantScope, sessio
 export async function getSettledAccuracy(scope: TenantScope, sessionId: string) {
   const db = await scopedDb(scope);
   const [session] = await db.select({ durationSeconds: readingSessions.durationSeconds }).from(readingSessions).where(eq(readingSessions.id, sessionId)).limit(1);
-  const words = await db.select({ judgement: readingWords.judgement, resolution: readingWords.resolution }).from(readingWords).where(eq(readingWords.sessionId, sessionId));
+  const words = await db.select({ judgement: readingWords.judgement, resolution: readingWords.resolution, progress: readingWords.progress }).from(readingWords).where(eq(readingWords.sessionId, sessionId));
   const reviewComplete = isReviewComplete(words);
   return {
     wordCount: words.length,
+    // Errors the analyser found and the five-intervention cap threw away. While this is above
+    // zero the reading cannot report a figure, because the words that would move it are not
+    // on the teacher's screen.
+    discardedErrors: discardedErrorCount(words),
     accuracy: accuracyFromWords(words),
     countedAgainst: words.filter(countsAgainstScore).length,
     reviewComplete,
@@ -708,7 +712,7 @@ export async function settledPaceBySession(scope: TenantScope, sessions: Readonl
   const paces = new Map<string, number | null>();
   if (!sessions.length) return paces;
   const db = await scopedDb(scope);
-  const rows = await db.select({ sessionId: readingWords.sessionId, judgement: readingWords.judgement, resolution: readingWords.resolution })
+  const rows = await db.select({ sessionId: readingWords.sessionId, judgement: readingWords.judgement, resolution: readingWords.resolution, progress: readingWords.progress })
     .from(readingWords).where(inArray(readingWords.sessionId, sessions.map(session => session.id)));
   const grouped = new Map<string, { judgement: typeof rows[number]["judgement"]; resolution: typeof rows[number]["resolution"] }[]>();
   for (const row of rows) grouped.set(row.sessionId, [...(grouped.get(row.sessionId) ?? []), row]);

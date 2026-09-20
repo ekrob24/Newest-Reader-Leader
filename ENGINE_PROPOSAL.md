@@ -466,3 +466,103 @@ Still worth running once credentials are in hand, as diagnosis rather than a pre
 presign a path outside the `reader-leader/` prefix and see whether Forge refuses. That tells us
 what was historically exposed. It touches a possibly shared store, so it gets said out loud
 before it is run.
+
+---
+
+# Found during the freeze
+
+Four findings from the pre-final audit. Two were fixed because they broke what the product
+claims to do; two are recorded so the judge brief can be corrected instead.
+
+## Fixed: the five-error cap was discarding errors and storing them as correct
+
+**The most serious defect found in this project.** `buildInterventions` keeps only the first
+five non-correct events. Every expected word still becomes a row, but a word with no surviving
+intervention is written with judgement `correct`, so **from the sixth error onward the
+analyser's judgement was discarded and the word recorded as read correctly.**
+
+Measured on a 20-word passage with 19 words misread:
+
+| | |
+| --- | --- |
+| non-correct events found | 19 |
+| interventions kept | 5 |
+| **errors stored as `correct`** | **14** |
+| settled accuracy after the teacher confirmed all five | **75%** |
+| true accuracy | 5% |
+
+The harm is not evenly distributed, and that is the point. A child with three errors has all
+three recorded. A child with nineteen has fourteen stored as correct. **The worse a child
+reads, the more accurate the record claims they are** — and the teacher cannot overrule what
+she is never shown. A reading assessment that reports its weakest readers as perfect inverts
+its own purpose, and inflates the record of exactly the children it exists to find.
+
+**Fixed by refusing to assert, not by changing the scoring.** Two days before the final, moving
+the cap would have changed the derived score, the review queue, the seeded data and the
+browser journey at once. Instead the mismatch is now a hard stop: `isReviewComplete` returns
+false, `accuracyFromWords` returns null, the settled WCPM follows, and the teacher's screen
+says how many more errors were found than kept.
+
+It needed nothing stored that was not stored already. `progress` carries what the analyser
+decided about each word independently of whether an intervention survived, so a row that is
+`incorrect` on progress and not an error on judgement is a discarded error. That detects all
+14 of 14 with no migration.
+
+**The real fix remains: record every non-correct event as a word row and cap at five only
+where a teacher's screen renders them.** A display limit is being used as a data limit, and
+that is the thing to undo. Estimated half a day, and it changes scoring, so it wants a quiet
+week rather than a deadline.
+
+## Fixed: the browser journey asserted a UI that no longer exists
+
+The walkthrough failed at the teacher dashboard, waiting for `Ms Kelly's Reading Class`. Not a
+regression — the tree from before this session's first commit fails identically. The dashboard
+this repository was merged to adopt does not show the class name on its default view, and the
+spec came from the older lineage and was never brought forward.
+
+Two contributing facts worth keeping: the class label reads "All my classes" whenever a teacher
+has more than one, and **the demo teacher has two**, because `provisionLocalDemoCohort` creates
+"Ms Kelly's Reading Class" and `seed:preview` creates "Reader Leader Demo Class". So the
+assertion was stale about data as well as about markup.
+
+A test asserting something that had ceased to be true is this project's own defect appearing in
+the test rather than the product — the same shape as an error message that reports a failure
+which did not happen.
+
+## To correct in the brief: there is no minimum group size anywhere
+
+The brief states that fairness is measured at cohort level with a minimum group size so that
+no number can identify one child. **No minimum is enforced in code.**
+
+`buildMonthlyAssessmentTrend` averages however many entries a month has, including one. It
+emits the session count into the CSV, so the n is visible, but nothing suppresses the row — and
+because it groups by month, even a class of several produces a single-child row in a month
+where only one child read. `computeFlagOverturnRate` divides by reviewed flags with no floor,
+so n=1 yields 0% or 100%.
+
+Both are behind `requireTeacher`, which limits the real disclosure, but the claim is about the
+number and the number has no floor. Roughly an hour to add a floor and a suppression label to
+both surfaces; until then the brief is wrong.
+
+## To correct in the brief: lapse-and-delete is not implemented, and should not be built yet
+
+The brief promises that a clip is kept until a teacher rules on it, and that an unreviewed flag
+lapses, the clip is deleted, and it never counts against the child. **There is no lapse and no
+deletion anywhere in the code.**
+
+Not under two hours, and the reason is not code volume:
+
+- `storage.ts` has presign-put and presign-get and **no delete**, and no Forge delete endpoint
+  is known to us.
+- There is **no scheduler** in the application at all.
+- It **cannot be tested to the standard this project uses** — proving the object is gone, not
+  that a row changed — because no environment, including CI, has storage configured.
+- It would be **thrown away**: storage is already committed to move to an EU bucket we control.
+
+Half a day to a day **after** the storage migration. Building it against Forge now is work for
+a backend we are leaving.
+
+The good half is worth keeping visible: `discarded_by_policy` means audio is scored and
+discarded within the same request, so the ordinary production state is that nothing was ever
+stored. That part of the story is true. Only the retained-clip path promises what it does not
+do.

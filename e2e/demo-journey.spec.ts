@@ -143,7 +143,17 @@ test("the demo journey", async ({ page, context }) => {
   await page.getByRole("button", { name: /Continue as Teacher/i }).click();
   await page.locator("input[type=password]").fill(TEACHER_PASSWORD);
   await page.getByRole("button", { name: /Open my reading space/i }).click();
-  await expect(page.getByText(/Ms Kelly.s Reading Class/)).toBeVisible();
+  // The workspace header, not the class name. The dashboard this repository was merged to
+  // adopt does not put the class name on the default view at all - it shows a class label that
+  // reads "All my classes" whenever the teacher has more than one, and this demo teacher has
+  // two, because provisionLocalDemoCohort makes "Ms Kelly\u2019s Reading Class" and
+  // seed:preview makes "Reader Leader Demo Class". The old assertion came from the earlier UI
+  // lineage and quietly stopped being true: a test asserting something that had ceased to
+  // hold, which is this project's own defect appearing in the test rather than the product.
+  // What follows carries the weight instead - the review panel, the flagged moments, the
+  // learner and the seeded record are all asserted below, and they only exist if the class
+  // loaded.
+  await expect(page.getByRole("heading", { name: /Notice the/ })).toBeVisible();
   await beat(page, "07-teacher-dashboard", 4);
 
   // 8. The class is in a reviewable state: the learner and their flagged reading moments are
@@ -202,7 +212,7 @@ test("the demo journey", async ({ page, context }) => {
   await beat(page, "12-accent-variation-never-counts", 4.5, settled);
 
   await page.getByRole("button", { name: /Return to Dashboard/i }).click();
-  await expect(page.getByText(/Ms Kelly.s Reading Class/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Notice the/ })).toBeVisible();
 
   // 9. The reading the child just finished reached the teacher, and nothing is sitting in the
   //    unrecorded-reading list — the surface that exists so a failed save is visible to

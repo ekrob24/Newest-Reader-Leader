@@ -9,14 +9,37 @@ change one and change the other.**
 
 ## Before you start
 
-Three environment facts, each of which silently breaks the demo if missed:
+Five variables. Each one breaks the demo in a way that does not name itself, so the symptom is
+in the table. **Read this before diagnosing anything on the day** - every one of these was hit
+from scratch while producing the walkthrough, and none is guessable from the screen.
 
-| Variable | Why it matters |
+| Variable | If it is missing, what you actually see |
 | --- | --- |
-| `DATABASE_URL` | MySQL 8. Run `pnpm drizzle-kit migrate` against it first. |
-| `JWT_SECRET` | Signs the demo session cookie. |
-| `VITE_APP_ID` | **Read at runtime by the server.** Without it the session token carries an empty `appId`, the server rejects every request with `[Auth] Session payload missing required fields`, and demo sign-in *appears to succeed then silently returns to the landing page*. |
-| `READER_LEADER_{CHILD,TEACHER,PARENT}_DEMO_PASSWORD` | The three sign-in passwords. |
+| `DATABASE_URL` | MySQL 8. Run `pnpm drizzle-kit migrate` against it first, then `pnpm seed:preview`. Without the seed, sign-in works and the library is empty. |
+| `JWT_SECRET` | Sign-in fails with **`Zero-length key is not supported`** in the server log and a generic failure on screen. The password is correct; the cookie cannot be signed. |
+| `VITE_APP_ID` | **Read at runtime by the server**, despite the `VITE_` prefix. Sign-in *succeeds*, sets a cookie, and then every following request is rejected: **`[Auth] Session payload missing required fields`**. On screen the password box simply sits there having apparently done nothing. |
+| `READER_LEADER_{CHILD,TEACHER,PARENT}_DEMO_PASSWORD` | The three sign-in passwords. Unset means an empty expected password and nothing matches. |
+
+`OAUTH_SERVER_URL` is **not** needed for the demo. The server logs
+`[OAuth] ERROR: OAUTH_SERVER_URL is not configured!` at startup and the demo sign-in path does
+not use it. Ignore that line; it is not the problem.
+
+One command, everything set, from a clean database:
+
+```bash
+export DATABASE_URL="mysql://USER:PASS@127.0.0.1:3306/readerleader"
+export JWT_SECRET="any-non-empty-string"
+export VITE_APP_ID="reader-leader-demo"
+export READER_LEADER_CHILD_DEMO_PASSWORD="..." \
+       READER_LEADER_TEACHER_DEMO_PASSWORD="..." \
+       READER_LEADER_PARENT_DEMO_PASSWORD="..."
+pnpm drizzle-kit migrate && pnpm seed:preview && pnpm build && pnpm demo:record
+```
+
+`pnpm demo:record` writes `demo-recording/reader-leader-walkthrough.webm` plus one screenshot
+per beat in `demo-recording/frames/`. It needs a database with **no teacher decisions on the
+seeded record** - the journey asserts that precondition and says so rather than failing
+obscurely, but a second run against a used database will stop there.
 
 **Serve over HTTPS.** The session cookie is `SameSite=None` and is only marked `Secure` when
 the request looks like HTTPS. Over plain HTTP the browser discards it and nobody can sign in.

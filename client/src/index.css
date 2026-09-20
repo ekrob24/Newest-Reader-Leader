@@ -776,3 +776,6 @@ select:focus,
 .review-queue-list button { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #d7dcec; background: #fff; border-radius: 10px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
 .queue-unscored-note { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: #596382; }
 @media (max-width: 640px) { .review-queue-list li { grid-template-columns: 26px 1fr 64px; } .review-queue-list .queue-time { display: none; } }
+
+/* A reading whose errors outran the five-intervention cap: say so where the figure would be. */
+.record-incomplete { margin: 12px 0 0; padding: 11px 13px; border-radius: 12px; background: #fff4ec; border: 1px solid #f6d3bb; color: #7a4a24; font-size: 13px; line-height: 1.55; }

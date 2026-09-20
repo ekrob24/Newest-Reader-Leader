@@ -20,6 +20,9 @@ export default defineConfig({
       "server/**/*.test.ts", "server/**/*.spec.ts",
       "shared/**/*.test.ts", "shared/**/*.spec.ts",
       "client/**/*.test.ts", "client/**/*.test.tsx", "client/**/*.spec.ts", "client/**/*.spec.tsx",
+      // scripts/gate.mjs decides whether the demo gate held. Its verdict is only worth
+      // having if a gate that never ran cannot read as green, so it is tested like the rest.
+      "scripts/**/*.test.mjs",
     ],
   },
 });

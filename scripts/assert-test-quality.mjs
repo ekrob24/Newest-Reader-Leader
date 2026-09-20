@@ -37,9 +37,12 @@ import { join } from "node:path";
  * walks it nor is meant to. Were the roots ever replaced by a walk of the repository, this
  * check would start reading Python and either find nothing and pass or throw - and it is a
  * guard against assertions that cannot fail, so it must not become one.
+ *
+ * `scripts/` is named here because scripts/gate.test.mjs lives there. A test file in a root
+ * this scan does not walk is the gap this scan exists to close.
  */
-const ROOTS = ["server", "shared", "client", "e2e"];
-const TEST_FILE = /\.(test|spec)\.(ts|tsx|mts)$/;
+const ROOTS = ["server", "shared", "client", "e2e", "scripts"];
+const TEST_FILE = /\.(test|spec)\.(ts|tsx|mts|mjs)$/;
 
 /** Each rule says what it bans and, in `why`, what to do instead. */
 const RULES = [

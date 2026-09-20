@@ -227,9 +227,19 @@ running record — each carrying only the figures its audience may see
 
 **In:** `mammoth` reads `.docx` and `pdf-parse` reads PDFs, so a teacher can upload a passage.
 
-**Audio:** none is stored. The upload path was deliberately removed. `@aws-sdk/client-s3`
-remains a dependency of the storage proxy for teacher materials; a reading's recording does
-not go through it.
+**Audio:** none is stored, and the reason is worth stating precisely rather than as a slogan.
+The authenticated save path does call `storagePut` for the recording, in parallel with
+transcription. Object storage is not configured — `BUILT_IN_FORGE_API_URL` and
+`BUILT_IN_FORGE_API_KEY` are unset — so that call raises `StorageUnavailableError`, and
+`classifyStorageOutcome` records `audioStatus: "storage_unavailable"` with a null key. The
+reading is saved; the audio is not. The code distinguishes *not configured* from *rejected*
+so an operator can tell a deployment fact from a fault.
+
+The separate **public, unauthenticated** upload route did store audio and was deliberately
+removed. `@aws-sdk/client-s3` remains for the teacher-materials storage proxy.
+
+**This means audio retention is one environment variable away.** `ENGINE_PROPOSAL.md` records
+that turning it on is a pre-pilot blocker until the storage decision is made.
 
 ---
 
@@ -320,6 +330,7 @@ ten-word transcript. Now only the reading time is chosen; everything else is com
 | --- | --- |
 | `RUNNING_LOCALLY.md` | Getting it running, and what to test |
 | `DATA_MODEL.md` | The tables as a diagram, how each model is used, and the two lexicons |
+| `ENGINE_IMPLEMENTATION.md` | What choosing and integrating a speech engine would actually take |
 | `DEMO_RUNBOOK.md` | The demo journey, step by step, including the no-microphone fallback |
 | `ENGINE_PROPOSAL.md` | The speech-engine evaluation, the open findings, and what is built but not live |
 | `DEPLOY_PREVIEW.md` | Standing up a preview instance |

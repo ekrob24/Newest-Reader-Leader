@@ -78,3 +78,9 @@ directory is the specification for it.
 `docs/evaluation/LESSONS_reader_leader_recurring_defects_v_1_1_2026-09-19.md` came from the same
 build and overlaps `ENGINE_PROPOSAL.md`. **Both are kept intact and unreconciled on purpose.**
 Merging them is a post-Galway job; doing it in a hurry would lose one of the two.
+
+---
+
+**What it would take to actually use this** — the consent and ethics path, the evidence
+the gates demand, and the two things the product cannot do today — is in
+`ENGINE_IMPLEMENTATION.md` at the repository root.

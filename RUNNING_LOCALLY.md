@@ -207,8 +207,10 @@ then run the start command from step 3 again.
 
 Worth knowing before you test it, so you do not report these as faults.
 
-- **No audio is stored.** The upload path was deliberately removed. A reading's recording is
-  not kept anywhere.
+- **No audio is stored** — because object storage is not configured, not because there is no
+  code for it. The save path attempts it, gets `StorageUnavailableError`, and records the
+  reading with `audioStatus: "storage_unavailable"`. That is why the "no recording was saved"
+  line appears on the report, and why `StorageUnavailableError` in the log is expected.
 - **Transcription is the browser's.** With no `OPENAI_API_KEY` set — and the project's rule is
   that it is not set — the server falls back to the transcript the browser produced. That is a
   deliberate resilience path, not a failure.

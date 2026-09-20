@@ -65,8 +65,11 @@ export async function measureClocks(url, now = () => Date.now()) {
 
     let rows = [];
     try {
+      // Every row, not the newest twenty. The first version of this sampled twenty and reported
+      // "all agree" while the row the failing test complained about sat outside the window -
+      // a sample that cannot contain the case under investigation answers a different question.
       const [saved] = await connection.query(
-        "SELECT id, createdAt FROM readingSessions ORDER BY createdAt DESC LIMIT 20",
+        "SELECT id, createdAt, capturedAt, capturedAtSource FROM readingSessions ORDER BY createdAt DESC LIMIT 2000",
       );
       rows = saved;
     } catch {
@@ -77,7 +80,14 @@ export async function measureClocks(url, now = () => Date.now()) {
       const minted = ulidTime(String(row.id));
       const stored = row.createdAt instanceof Date ? row.createdAt : new Date(String(row.createdAt));
       if (minted === null || Number.isNaN(stored.getTime())) continue;
-      samples.push({ id: String(row.id), gapMinutes: Math.round((stored.getTime() - minted) / 60000) });
+      samples.push({
+        id: String(row.id),
+        gapMinutes: Math.round((stored.getTime() - minted) / 60000),
+        createdAt: stored.toISOString(),
+        minted: new Date(minted).toISOString(),
+        capturedAtSource: String(row.capturedAtSource ?? ""),
+        hasDeviceClock: row.capturedAt !== null && row.capturedAt !== undefined,
+      });
     }
     return { globalTz, sessionTz, systemTz, functionSkewMinutes, samples };
   } finally {
@@ -117,11 +127,17 @@ export function clockReport(measurement, { machineTz, offsetHours }) {
     return lines;
   }
   if (column === null) {
-    lines.push(`THE COLUMN  : ${samples.length} rows sampled and they do NOT agree with each other.`);
-    for (const sample of samples.slice(0, 5)) lines.push(`    ${sample.id}  ${sample.gapMinutes} minutes`);
+    // Show the rows that are out, not the first few rows. A timezone moves every row together;
+    // a handful out among many is a different fault and the offenders are the evidence.
+    const offenders = samples.filter(sample => Math.abs(sample.gapMinutes) > 1);
+    lines.push(`THE COLUMN  : ${samples.length} rows sampled; ${offenders.length} of them are out, the rest are exact.`);
+    for (const sample of offenders.slice(0, 8)) {
+      lines.push(`    ${sample.gapMinutes >= 0 ? "+" : ""}${sample.gapMinutes} min  ${sample.id}`);
+      lines.push(`        createdAt ${sample.createdAt}  id minted ${sample.minted}  source ${sample.capturedAtSource}${sample.hasDeviceClock ? " (device clock recorded)" : ""}`);
+    }
     lines.push("");
-    lines.push("Rows disagreeing among themselves is not a timezone setting. Something changed");
-    lines.push("between them - a restart, a setting, or a clock change. Send this whole output.");
+    lines.push("Some rows out and the rest exact is not a timezone setting - a timezone moves");
+    lines.push("every row together. Whatever those rows have in common is the cause.");
     return lines;
   }
   lines.push(`THE COLUMN  : createdAt is ${describe(column)} the instant each row's own id was minted, across all ${samples.length} sampled rows.`);

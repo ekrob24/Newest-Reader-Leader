@@ -8,7 +8,7 @@ import { createSessionIdFactory, newSessionId, sessionIdTime } from "../shared/s
  * wording are both tested, and the ULID decode is held against the real implementation.
  */
 const view = { machineTz: "Europe/London", offsetHours: 1 };
-const rows = (...gaps) => gaps.map((gapMinutes, index) => ({ id: `id-${index}`, gapMinutes }));
+const rows = (...gaps) => gaps.map((gapMinutes, index) => ({ id: `id-${index}`, gapMinutes, createdAt: "t", minted: "t", capturedAtSource: "server", hasDeviceClock: false }));
 const read = (overrides = {}) => clockReport({
   globalTz: "SYSTEM", sessionTz: "SYSTEM", systemTz: "GMT Summer Time",
   functionSkewMinutes: 0, samples: rows(0), ...overrides,
@@ -67,10 +67,19 @@ describe("what the reading says", () => {
     expect(out).not.toContain("The column is out by");
   });
 
-  it("says so, and asks for the output, when the rows disagree among themselves", () => {
-    const out = read({ samples: rows(60, 0, 60) });
-    expect(out).toContain("do NOT agree with each other");
-    expect(out).toContain("Send this whole output");
+  it("names the rows that are out, rather than the first rows it happened to sample", () => {
+    const samples = [
+      { id: "A", gapMinutes: 0, createdAt: "t", minted: "t", capturedAtSource: "server", hasDeviceClock: false },
+      { id: "OUT", gapMinutes: 60, createdAt: "t+1h", minted: "t", capturedAtSource: "server", hasDeviceClock: true },
+      { id: "B", gapMinutes: 0, createdAt: "t", minted: "t", capturedAtSource: "device", hasDeviceClock: true },
+    ];
+    const out = read({ samples });
+    expect(out).toContain("3 rows sampled; 1 of them are out, the rest are exact");
+    expect(out).toContain("+60 min  OUT");
+    expect(out).toContain("device clock recorded");
+    // The row that is fine must not be listed as evidence.
+    expect(out).not.toContain("  A\n");
+    expect(out).toContain("not a timezone setting");
   });
 
   it("says it measured nothing when there are no saved readings, rather than no skew", () => {

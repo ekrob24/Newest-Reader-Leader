@@ -74,13 +74,28 @@ describe.skipIf(!databaseAvailable)("session identity", () => {
   it("prefers server time for a tablet whose clock is far out, without discarding the reading", async () => {
     const { scope, childProfileId } = await fixture();
     const device = new Date(Date.now() + CAPTURE_CLOCK_TOLERANCE_MS + 60 * 60 * 1000);
+    const openedAt = Date.now();
     const saved = await saveReadingSession(scope, { ...baseSession(childProfileId), capturedAt: device });
+    const closedAt = Date.now();
     expect(saved.capturedAtSource).toBe("server");
     // The device's claim is still on the row, so the bad clock stays diagnosable.
     expect(saved.capturedAt).not.toBeNull();
     expect(Math.abs((saved.capturedAt as Date).getTime() - device.getTime())).toBeLessThan(1000);
     // ...and the server's own timestamp is unaffected.
-    expect(Math.abs(saved.createdAt.getTime() - Date.now())).toBeLessThan(60_000);
+    //
+    // The message carries every number the comparison used. This assertion failed on a real
+    // machine reporting only "expected 3599498 to be less than 60000", which is a difference
+    // with no inputs attached: it cost three rounds of guessing at causes, and two diagnostics
+    // that measured the wrong thing, before anyone could see what the row actually held.
+    const evidence = [
+      `createdAt=${saved.createdAt.toISOString()}`,
+      `insert window=${new Date(openedAt).toISOString()}..${new Date(closedAt).toISOString()}`,
+      `capturedAt=${saved.capturedAt ? (saved.capturedAt as Date).toISOString() : "null"}`,
+      `device claimed=${device.toISOString()}`,
+      `id minted=${new Date(sessionIdTime(saved.id)).toISOString()}`,
+      `source=${saved.capturedAtSource}`,
+    ].join("  ");
+    expect(Math.abs(saved.createdAt.getTime() - Date.now()), evidence).toBeLessThan(60_000);
   });
 
   it("records no device clock when none is supplied", async () => {
